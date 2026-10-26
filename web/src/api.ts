@@ -124,10 +124,12 @@ export const api = {
     get<ResourceItem[]>(`/v1/clusters/${c(id)}/resources`, { ...kindQuery(kind), namespace }),
   get: (id: string, kind: ResourceKind, namespace: string | undefined, name: string) =>
     get<unknown>(`/v1/clusters/${c(id)}/resource`, { ...kindQuery(kind), namespace, name }),
-  logs: (id: string, namespace: string, pod: string, container?: string, tail = 200) =>
-    get<{ lines: string[] }>(`/v1/clusters/${c(id)}/pods/${c(namespace)}/${c(pod)}/logs`, {
+  /** Without since: the last `tail` lines. With since (the previous answer's `last`): only newer lines. */
+  logs: (id: string, namespace: string, pod: string, container?: string, tail = 200, since?: string) =>
+    get<{ lines: string[]; last?: string }>(`/v1/clusters/${c(id)}/pods/${c(namespace)}/${c(pod)}/logs`, {
       container,
       tail: String(tail),
+      since,
     }),
   /** Validates a token without storing it. */
     /** CPU and memory: per node (scope "nodes") or per pod (scope "pods", optionally one namespace). */
