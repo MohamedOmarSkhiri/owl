@@ -280,7 +280,7 @@ func main() {
 	mux.HandleFunc("GET /v1/clusters/{id}/resource", requireToken(appToken,
 		s.proxy("get", queryParams("group", "version", "resource", "namespace", "name"))))
 	mux.HandleFunc("GET /v1/clusters/{id}/pods/{ns}/{name}/logs", requireToken(appToken, s.proxy("logs", logParams)))
-
+	mux.HandleFunc("GET /v1/clusters/{id}/usage", requireToken(appToken, s.proxy("usage", queryParams("scope", "namespace"))))
 	if *webDir != "" {
 		mux.Handle("GET /", webApp(*webDir))
 		log.Printf("serving the web app from %s", *webDir)

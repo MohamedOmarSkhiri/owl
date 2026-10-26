@@ -364,7 +364,7 @@ func main() {
 	log.Print("caches synced, reporting")
 
 	// Answer live requests from the app (resource browser, pod logs) via the relay.
-	go serveRequests(ctx, cfg, client, relay, *clusterName)
+	go serveRequests(ctx, cfg, client, podInf.Lister(), nodeInf.Lister(), relay, *clusterName)
 
 	podLister := podInf.Lister()
 	nodeLister := nodeInf.Lister()
