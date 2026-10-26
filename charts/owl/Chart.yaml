@@ -1,0 +1,16 @@
+apiVersion: v2
+name: owl
+description: Watch your Kubernetes clusters from the browser. Web app, relay and read-only agents.
+type: application
+# Release process: bump version AND appVersion to the new release, add a CHANGELOG entry,
+# then push the tag v<version>. The release workflow refuses a tag that does not match.
+version: 0.3.0
+appVersion: "0.3.0"
+home: https://github.com/MohamedOmarSkhiri/owl
+sources:
+  - https://github.com/MohamedOmarSkhiri/owl
+icon: https://raw.githubusercontent.com/MohamedOmarSkhiri/owl/main/web/public/owl.svg
+keywords: [kubernetes, k3s, monitoring, dashboard, observability]
+maintainers:
+  - name: Mohamed Omar Skhiri
+    url: https://www.linkedin.com/in/mohamed-omar-skhiri

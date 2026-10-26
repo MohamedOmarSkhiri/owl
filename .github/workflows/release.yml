@@ -1,0 +1,110 @@
+# Push a tag like v0.4.0 to release:
+#   - multi-arch images  ghcr.io/<owner>/owl-relay:0.4.0  and  ghcr.io/<owner>/owl-agent:0.4.0
+#   - Helm chart          oci://ghcr.io/<owner>/charts/owl  version 0.4.0
+#   - GitHub Release      notes from CHANGELOG.md, chart .tgz attached
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # push images and the chart to GHCR
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Version from the tag
+        id: v
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          OWNER="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          CHART_VERSION="$(grep -E '^version:' charts/owl/Chart.yaml | awk '{print $2}')"
+          if [ "$CHART_VERSION" != "$VERSION" ]; then
+            echo "::error::Tag v$VERSION but charts/owl/Chart.yaml has version $CHART_VERSION. Bump Chart.yaml first."
+            exit 1
+          fi
+          grep -q "^## \[$VERSION\]" CHANGELOG.md || { echo "::error::CHANGELOG.md has no '## [$VERSION]' section"; exit 1; }
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "owner=$OWNER" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Relay image (with the web app)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: relay/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.v.outputs.version }}
+          push: true
+          tags: |
+            ghcr.io/${{ steps.v.outputs.owner }}/owl-relay:${{ steps.v.outputs.version }}
+            ghcr.io/${{ steps.v.outputs.owner }}/owl-relay:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha,scope=relay
+          cache-to: type=gha,scope=relay,mode=max
+
+      - name: Agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: agent/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          build-args: VERSION=${{ steps.v.outputs.version }}
+          push: true
+          tags: |
+            ghcr.io/${{ steps.v.outputs.owner }}/owl-agent:${{ steps.v.outputs.version }}
+            ghcr.io/${{ steps.v.outputs.owner }}/owl-agent:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.v.outputs.version }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,scope=agent,mode=max
+
+      - uses: azure/setup-helm@v4
+
+      - name: Package and push the chart
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          OWNER: ${{ steps.v.outputs.owner }}
+        run: |
+          sed -i "s#ghcr.io/GITHUB_USER/#ghcr.io/${OWNER}/#g" charts/owl/values.yaml
+          sed -i "s#/GITHUB_USER/#/${OWNER}/#g" charts/owl/Chart.yaml
+          helm lint charts/owl
+          helm package charts/owl --version "$VERSION" --app-version "$VERSION" -d dist
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/owl-${VERSION}.tgz" "oci://ghcr.io/${OWNER}/charts"
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.v.outputs.version }}
+          OWNER: ${{ steps.v.outputs.owner }}
+        run: |
+          awk -v head="## [${VERSION}]" 'index($0, head) == 1 {p = 1; next} /^## \[/ {if (p) exit} p' CHANGELOG.md > notes.md
+          cat >> notes.md <<EOF
+
+          ## Install
+
+          \`\`\`bash
+          helm install owl oci://ghcr.io/${OWNER}/charts/owl --version ${VERSION} -n owl --create-namespace
+          \`\`\`
+
+          Images: \`ghcr.io/${OWNER}/owl-relay:${VERSION}\`, \`ghcr.io/${OWNER}/owl-agent:${VERSION}\` (linux/amd64, linux/arm64)
+          EOF
+          gh release create "v${VERSION}" "dist/owl-${VERSION}.tgz" --title "Owl v${VERSION}" --notes-file notes.md

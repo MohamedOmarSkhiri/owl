@@ -1,0 +1,29 @@
+name: Bug report
+description: Something does not work as described
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what you saw instead.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Owl version
+      description: "helm list -n owl shows it in APP VERSION"
+    validations:
+      required: true
+  - type: input
+    id: kubernetes
+    attributes:
+      label: Kubernetes distribution and version
+      placeholder: K3s v1.36.5+k3s1
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: "kubectl -n owl logs -l app.kubernetes.io/instance=owl --all-containers --prefix --tail=50"
+      render: text

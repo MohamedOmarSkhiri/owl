@@ -1,0 +1,24 @@
+# Build output
+relay/bin/
+agent/bin/
+web/node_modules/
+web/dist/
+*.tsbuildinfo
+dist/
+
+# Editors
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+
+# Secrets: never commit these
+*.env
+.env*
+*.pem
+*.key
+*kubeconfig*.yaml
+owl-phone.yaml
+
+# Downloads
+*.zip

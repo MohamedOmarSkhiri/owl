@@ -1,0 +1,134 @@
+{{- $full := include "owl.fullname" . }}
+{{- if and .Values.rbac.create (include "owl.hasLocal" .) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $full }}-agent
+  labels: {{- include "owl.labels" . | nindent 4 }}
+---
+# Read-only. RBAC can only add permissions, so "everything except Secrets" means listing
+# core resources one by one and naming the other API groups. Secrets are never granted.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $full }}-agent-read
+  labels: {{- include "owl.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, nodes, namespaces, events, services, endpoints, configmaps,
+                persistentvolumes, persistentvolumeclaims, serviceaccounts, replicationcontrollers,
+                resourcequotas, limitranges]
+    verbs: [get, list, watch]
+  - apiGroups:
+      - apps
+      - batch
+      - autoscaling
+      - policy
+      - networking.k8s.io
+      - storage.k8s.io
+      - discovery.k8s.io
+      - events.k8s.io
+      - scheduling.k8s.io
+      - node.k8s.io
+      - coordination.k8s.io
+      - rbac.authorization.k8s.io
+      - apiextensions.k8s.io
+      - admissionregistration.k8s.io
+      - metrics.k8s.io
+      {{- range .Values.rbac.extraApiGroups }}
+      - {{ . }}
+      {{- end }}
+    resources: ["*"]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $full }}-agent-read
+  labels: {{- include "owl.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $full }}-agent-read
+subjects:
+  - kind: ServiceAccount
+    name: {{ $full }}-agent
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+{{- range .Values.clusters }}
+{{- $local := and (not .kubeconfig) (not .existingSecret) }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $full }}-agent-{{ .name }}
+  labels: {{- include "owl.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: agent
+    owl.dev/cluster: {{ .name }}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: agent
+      owl.dev/cluster: {{ .name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ $.Release.Name }}
+        app.kubernetes.io/component: agent
+        owl.dev/cluster: {{ .name }}
+      {{- if .kubeconfig }}
+      annotations:
+        checksum/kubeconfig: {{ .kubeconfig | sha256sum }}   # restart when the kubeconfig changes
+      {{- end }}
+    spec:
+      {{- if $local }}
+      serviceAccountName: {{ $full }}-agent
+      {{- else }}
+      automountServiceAccountToken: false   # uses the provided kubeconfig, not this cluster's identity
+      {{- end }}
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: {{- include "owl.podSecurity" $ | nindent 8 }}
+      containers:
+        - name: agent
+          image: {{ include "owl.agent.image" $ }}
+          imagePullPolicy: {{ $.Values.image.agent.pullPolicy }}
+          env:
+            - {name: AGENT_CLUSTER, value: {{ .name | quote }}}
+            - {name: AGENT_RELAY, value: "http://{{ include "owl.relay.name" $ }}:2300"}
+            - name: AGENT_TOKEN
+              valueFrom: {secretKeyRef: {name: {{ include "owl.tokens.name" $ }}, key: agent-token}}
+            {{- if not $local }}
+            - {name: KUBECONFIG, value: /kube/config}
+            {{- end }}
+            {{- with .context }}
+            - {name: AGENT_KUBE_CONTEXT, value: {{ . | quote }}}
+            {{- end }}
+          resources: {{- toYaml $.Values.agent.resources | nindent 12 }}
+          securityContext: {{- include "owl.containerSecurity" $ | nindent 12 }}
+          {{- if not $local }}
+          volumeMounts:
+            - {name: kubeconfig, mountPath: /kube, readOnly: true}
+          {{- end }}
+      {{- if not $local }}
+      volumes:
+        - name: kubeconfig
+          secret:
+            secretName: {{ .existingSecret | default (printf "%s-kubeconfig-%s" $full .name) }}
+            items:
+              - {key: config, path: config}
+      {{- end }}
+      {{- with $.Values.agent.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.agent.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.agent.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,36 @@
+Owl is installed. Watching: {{ range $i, $c := .Values.clusters }}{{ if $i }}, {{ end }}{{ $c.name }}{{ end }}
+
+1. Your sign-in token (the app token):
+
+   kubectl -n {{ .Release.Namespace }} get secret {{ include "owl.tokens.name" . }} -o jsonpath='{.data.app-token}' | base64 -d; echo
+
+2. Open the web app:
+{{- if eq .Values.service.type "LoadBalancer" }}
+
+   kubectl -n {{ .Release.Namespace }} get svc {{ include "owl.relay.name" . }}
+   http://<EXTERNAL-IP>:{{ .Values.service.httpPort }}
+   {{- if .Values.tls.enabled }}
+   https://<EXTERNAL-IP>{{ if ne (int .Values.service.httpsPort) 443 }}:{{ .Values.service.httpsPort }}{{ end }}
+   {{- end }}
+{{- else if eq .Values.service.type "NodePort" }}
+
+   kubectl -n {{ .Release.Namespace }} get svc {{ include "owl.relay.name" . }}
+   http://<NODE-IP>:<nodePort of "http">   (and https://<NODE-IP>:<nodePort of "https">)
+{{- else }}
+
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "owl.relay.name" . }} 2300:{{ .Values.service.httpPort }}{{ if .Values.tls.enabled }} 8443:{{ .Values.service.httpsPort }}{{ end }}
+   http://localhost:2300{{ if .Values.tls.enabled }}   or   https://localhost:8443{{ end }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+   Ingress: http{{ if .Values.ingress.tls.secretName }}s{{ end }}://{{ .Values.ingress.host }}
+{{- end }}
+{{- if and .Values.tls.enabled (eq .Values.tls.mode "selfSigned") }}
+
+   HTTPS uses a self-signed certificate: the browser warns once. Use tls.mode=certManager
+   or tls.mode=secret for a trusted certificate.
+{{- end }}
+
+3. Check the agents:
+
+   kubectl -n {{ .Release.Namespace }} get pods -l app.kubernetes.io/instance={{ .Release.Name }}
+   kubectl -n {{ .Release.Namespace }} logs -l app.kubernetes.io/component=agent --prefix --tail=5

@@ -1,0 +1,114 @@
+# Runs on every pull request and every push to main.
+# A change is mergeable only when all jobs are green, including a real install on a kind cluster.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: go (${{ matrix.component }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        component: [relay, agent]
+    defaults:
+      run:
+        working-directory: ${{ matrix.component }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: ${{ matrix.component }}/go.mod
+          cache: false
+      - name: gofmt
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            gofmt -l .
+            echo "::error::Unformatted Go files. Fix with gofmt -w ."
+            exit 1
+          fi
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: go build ./...
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run build   # type-check (tsc) + production build
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - run: helm lint charts/owl
+      - name: Render the main configurations
+        run: |
+          helm template owl charts/owl -n owl > /dev/null
+          helm template owl charts/owl -n owl --set tls.enabled=false --set service.type=NodePort > /dev/null
+          helm template owl charts/owl -n owl --set service.type=LoadBalancer \
+            --set tls.mode=certManager --set 'tls.hosts={owl.example.com}' \
+            --set 'clusters[0].name=local' --set 'clusters[1].name=prod' \
+            --set 'clusters[1].kubeconfig=apiVersion: v1' > /dev/null
+
+  e2e:
+    name: install on kind
+    needs: [go, web, chart]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: owl
+      - name: Build images
+        run: |
+          docker build -f relay/Dockerfile -t owl-relay:ci --build-arg VERSION=ci .
+          docker build -f agent/Dockerfile -t owl-agent:ci --build-arg VERSION=ci .
+          kind load docker-image owl-relay:ci owl-agent:ci --name owl
+      - name: Install the chart
+        run: |
+          helm install owl charts/owl -n owl --create-namespace --wait --timeout 3m \
+            --set image.relay.repository=owl-relay --set image.relay.tag=ci \
+            --set image.agent.repository=owl-agent --set image.agent.tag=ci
+          kubectl -n owl get pods,svc
+      - name: Check HTTP, HTTPS, sign-in and live data
+        run: |
+          kubectl -n owl port-forward svc/owl-relay 2300:2300 8443:443 &
+          sleep 3
+          TOKEN=$(kubectl -n owl get secret owl-tokens -o jsonpath='{.data.app-token}' | base64 -d)
+          curl -sf http://localhost:2300/healthz
+          curl -sfk https://localhost:8443/healthz
+          curl -sf http://localhost:2300/ | grep -q '<div id="root">'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:2300/v1/clusters)" = 401
+          for i in $(seq 1 30); do
+            curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/clusters | grep -q '"local"' && break
+            sleep 2
+          done
+          curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/clusters | grep '"local"'
+          curl -sf -H "Authorization: Bearer $TOKEN" \
+            'http://localhost:2300/v1/clusters/local/resources?version=v1&resource=namespaces' | grep -q kube-system
+          echo "agent reports, relay proxies live requests, RBAC works"
+      - name: Logs on failure
+        if: failure()
+        run: kubectl -n owl logs -l app.kubernetes.io/instance=owl --all-containers --prefix --tail=100

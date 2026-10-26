@@ -1,0 +1,21 @@
+# Weekly update PRs for dependencies; CI tests each one before you merge it.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories: ["/relay", "/agent"]
+    schedule: {interval: weekly}
+    groups:
+      kubernetes:
+        patterns: ["k8s.io/*"]
+  - package-ecosystem: npm
+    directory: /web
+    schedule: {interval: weekly}
+    groups:
+      web:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directories: ["/relay", "/agent"]
+    schedule: {interval: weekly}
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: {interval: weekly}

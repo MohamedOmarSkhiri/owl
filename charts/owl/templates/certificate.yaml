@@ -1,0 +1,31 @@
+{{- if and .Values.tls.enabled (eq .Values.tls.mode "certManager") }}
+{{- if not .Values.tls.hosts }}
+{{- fail "tls.mode=certManager needs at least one public DNS name in tls.hosts" }}
+{{- end }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "owl.fullname" . }}
+  labels: {{- include "owl.labels" . | nindent 4 }}
+{{- $dns := list }}{{- $ips := list }}
+{{- range .Values.tls.hosts }}
+{{- if regexMatch "^[0-9.]+$" . }}{{ $ips = append $ips . }}{{ else }}{{ $dns = append $dns . }}{{ end }}
+{{- end }}
+spec:
+  secretName: {{ include "owl.tls.name" . }}
+  {{- with $dns }}
+  dnsNames: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $ips }}
+  ipAddresses: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  issuerRef:
+    kind: {{ .Values.tls.certManager.issuerRef.kind }}
+    name: {{ .Values.tls.certManager.issuerRef.name }}
+{{- end }}
+{{- if and .Values.tls.enabled (eq .Values.tls.mode "secret") (not .Values.tls.secretName) }}
+{{- fail "tls.mode=secret needs tls.secretName (an existing kubernetes.io/tls Secret)" }}
+{{- end }}
+{{- if not (has .Values.tls.mode (list "selfSigned" "secret" "certManager")) }}
+{{- fail "tls.mode must be selfSigned, secret or certManager" }}
+{{- end }}
