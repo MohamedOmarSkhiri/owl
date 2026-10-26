@@ -130,6 +130,10 @@ export const api = {
       tail: String(tail),
     }),
   /** Validates a token without storing it. */
+    /** CPU and memory: per node (scope "nodes") or per pod (scope "pods", optionally one namespace). */
+  usage: (id: string, scope: 'nodes' | 'pods', namespace?: string) =>
+    get<UsageReport>(`/v1/clusters/${c(id)}/usage`, { scope, namespace }),
+  /** Validates a token without storing it. */
   check: async (token: string) => {
     const res = await fetch('/v1/clusters', { headers: { Authorization: `Bearer ${token}` } })
     if (res.status === 401) throw new ApiError(401, 'This token was rejected by the relay.')
@@ -158,3 +162,58 @@ export function kindLabel(k: ResourceKind): string {
 }
 
 export const sameKind = (a: ResourceKind, b: ResourceKind) => a.group === b.group && a.resource === b.resource
+// ---------- Resource usage (answered by the agent from metrics-server + Kubernetes) ----------
+// CPU values are millicores (1000 = one core), memory values are bytes.
+
+export interface NodeUsage {
+  name: string
+  ready: boolean
+  pods: number
+  cpuUsage: number
+  memUsage: number
+  cpuAllocatable: number // what pods may use on this node
+  memAllocatable: number
+  cpuRequests: number // sum of the requests of the pods placed on it
+  memRequests: number
+}
+
+export interface PodUsage {
+  name: string
+  namespace: string
+  node: string
+  workloadKind: string // Deployment, StatefulSet, DaemonSet, Job, Pod...
+  workloadName: string
+  sampled: boolean // false: metrics-server has no sample yet (pod just started)
+  cpuUsage: number
+  memUsage: number
+  cpuRequest: number
+  cpuLimit: number // 0 = no limit
+  memRequest: number
+  memLimit: number
+}
+
+export interface UsageReport {
+  metrics: boolean // false when metrics-server is missing: usage values are then 0
+  message?: string
+  nodes?: NodeUsage[]
+  pods?: PodUsage[]
+}
+
+/** 250 -> "250m", 1500 -> "1.5 cores" */
+export function fmtCPU(milli: number): string {
+  if (milli < 1000) return `${Math.round(milli)}m`
+  const cores = milli / 1000
+  return `${cores >= 10 ? cores.toFixed(0) : cores.toFixed(1)} cores`
+}
+
+/** Binary units, like kubectl: 134217728 -> "128 Mi" */
+export function fmtMem(bytes: number): string {
+  const units = ['B', 'Ki', 'Mi', 'Gi', 'Ti']
+  let v = bytes
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`
+}

@@ -3,9 +3,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, NavLink, Route, Routes, useParams } from 'react-router'
 import { LogOut } from 'lucide-react'
 import { api, ApiError, getToken, setToken, timeAgo, type Cluster } from './api'
-import { ExploreTab, PodsTab, ProblemsTab } from './components/tabs'
 import { ErrorNote, HealthDot, healthText, inputClass, Loading, OwlMark, Pulse } from './components/ui'
-
+import { ExploreTab, PodsTab, ProblemsTab } from './components/tabs'   // existing: the 3 original tabs
+import { ClusterUsageStats, UsageTab } from './components/usage'      // new: the Usage tab
 export default function App() {
   const [signedIn, setSignedIn] = useState(() => !!getToken())
   const client = useQueryClient()
@@ -162,6 +162,7 @@ const TABS = [
   { key: 'problems', label: 'Problems' },
   { key: 'pods', label: 'Pods' },
   { key: 'explore', label: 'Explore' },
+  { key: 'usage', label: 'Usage' },
 ] as const
 
 function ClusterView({ clusters }: { clusters: Cluster[] }) {
@@ -184,6 +185,7 @@ function ClusterView({ clusters }: { clusters: Cluster[] }) {
             <Stat label="Nodes ready" value={`${cluster.nodesReady}/${cluster.nodesTotal}`} />
             <Stat label="Pods running" value={`${cluster.podsRunning}/${cluster.podsTotal}`} />
             <Stat label="Pods failing" value={String(cluster.podsFailing)} bad={cluster.podsFailing > 0} />
+            <ClusterUsageStats cluster={cluster.id} />
           </dl>
         </div>
         <div className="mt-3">
@@ -211,6 +213,8 @@ function ClusterView({ clusters }: { clusters: Cluster[] }) {
           <PodsTab key={cluster.id} cluster={cluster.id} />
         ) : tab === 'explore' ? (
           <ExploreTab key={cluster.id} cluster={cluster.id} />
+        ) : tab === 'usage' ? (
+          <UsageTab key={cluster.id} cluster={cluster.id} />
         ) : (
           <ProblemsTab key={cluster.id} cluster={cluster.id} />
         )}

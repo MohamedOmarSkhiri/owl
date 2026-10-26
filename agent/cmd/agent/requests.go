@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 )
 
@@ -62,18 +63,21 @@ type ResourceItem struct {
 var errSecretsBlocked = errors.New("secrets are not exposed by the KubePulse agent")
 
 type requestHandler struct {
-	cs  kubernetes.Interface
-	dyn dynamic.Interface
+	cs    kubernetes.Interface
+	dyn   dynamic.Interface
+	pods  listerscorev1.PodLister  // informer caches: requests, limits, owners, node placement
+	nodes listerscorev1.NodeLister // without extra API calls
 }
 
 // serveRequests long-polls the relay and answers each request in its own goroutine.
-func serveRequests(ctx context.Context, cfg *rest.Config, cs kubernetes.Interface, relay *relayClient, cluster string) {
+func serveRequests(ctx context.Context, cfg *rest.Config, cs kubernetes.Interface,
+	pods listerscorev1.PodLister, nodes listerscorev1.NodeLister, relay *relayClient, cluster string) {
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		log.Printf("live requests disabled: %v", err)
 		return
 	}
-	h := &requestHandler{cs: cs, dyn: dyn}
+	h := &requestHandler{cs: cs, dyn: dyn, pods: pods, nodes: nodes}
 	poll := &http.Client{Timeout: 40 * time.Second} // relay holds a poll up to 25s
 	pollURL := relay.base + "/v1/agent/requests?cluster=" + url.QueryEscape(cluster)
 
@@ -147,6 +151,8 @@ func (h *requestHandler) handle(parent context.Context, req *agentRequest) agent
 		out, err = h.get(ctx, p)
 	case "logs":
 		out, err = h.logs(ctx, p)
+	case "usage":
+		out, err = h.usage(ctx, p)
 	default:
 		return agentResponse{Status: http.StatusBadRequest, Error: "unknown request kind " + req.Kind}
 	}

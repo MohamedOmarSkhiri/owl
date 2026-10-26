@@ -19,7 +19,7 @@ function OpenPanel({ cluster, open, onClose }: { cluster: string; open: Open; on
   )
 }
 
-function NamespaceSelect({ cluster, value, onChange }: { cluster: string; value: string; onChange: (v: string) => void }) {
+export function NamespaceSelect({ cluster, value, onChange }: { cluster: string; value: string; onChange: (v: string) => void }) {
   const q = useQuery({ queryKey: ['list', cluster, 'namespaces'], queryFn: () => api.list(cluster, NAMESPACES) })
   const names = (q.data ?? []).map((n) => n.name).sort()
   return (
@@ -37,7 +37,7 @@ function NamespaceSelect({ cluster, value, onChange }: { cluster: string; value:
   )
 }
 
-function SearchBox({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
+export function SearchBox({ value, onChange, label }: { value: string; onChange: (v: string) => void; label: string }) {
   return (
     <label className="relative flex-1 sm:max-w-72">
       <span className="sr-only">{label}</span>
