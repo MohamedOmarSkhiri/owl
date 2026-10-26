@@ -34,6 +34,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 
 {{- define "owl.podSecurity" -}}
 runAsNonRoot: true
+runAsUser: 65532      # distroless "nonroot"; must be numeric for the kubelet to verify runAsNonRoot
+runAsGroup: 65532
 seccompProfile:
   type: RuntimeDefault
 {{- end -}}
