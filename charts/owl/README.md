@@ -3,7 +3,7 @@
 Installs the Owl relay (web app + API) and one read-only agent per watched cluster.
 
 ```bash
-helm install owl oci://ghcr.io/MohamedOmarSkhiri/charts/owl -n owl --create-namespace
+helm install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --create-namespace
 ```
 
 ## Ports
@@ -29,7 +29,7 @@ Each entry in `clusters` runs one agent.
 Kubeconfigs must embed their credentials. Exec plugins (`aws`, `gke-gcloud-auth-plugin`, `kubelogin`) cannot run in the agent image.
 
 ```bash
-helm upgrade --install owl oci://ghcr.io/MohamedOmarSkhiri/charts/owl -n owl --reuse-values \
+helm upgrade --install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reuse-values \
   --set 'clusters[0].name=local' \
   --set 'clusters[1].name=prod' --set-file 'clusters[1].kubeconfig=./prod.yaml'
 ```
@@ -38,9 +38,9 @@ helm upgrade --install owl oci://ghcr.io/MohamedOmarSkhiri/charts/owl -n owl --r
 
 | Key | Default | Description |
 |---|---|---|
-| `image.relay.repository` | `ghcr.io/MohamedOmarSkhiri/owl-relay` | Relay image (includes the web app) |
+| `image.relay.repository` | `ghcr.io/mohamedomarskhiri/owl-relay` | Relay image (includes the web app) |
 | `image.relay.tag` | chart `appVersion` | |
-| `image.agent.repository` | `ghcr.io/MohamedOmarSkhiri/owl-agent` | Agent image |
+| `image.agent.repository` | `ghcr.io/mohamedomarskhiri/owl-agent` | Agent image |
 | `image.agent.tag` | chart `appVersion` | |
 | `imagePullSecrets` | `[]` | For private registries |
 | `auth.existingSecret` | `""` | Secret with keys `app-token` and `agent-token` |

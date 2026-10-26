@@ -7,11 +7,11 @@
 
 image:
   relay:
-    repository: ghcr.io/MohamedOmarSkhiri/owl-relay
+    repository: ghcr.io/mohamedomarskhiri/owl-relay
     tag: ""            # defaults to the chart appVersion
     pullPolicy: IfNotPresent
   agent:
-    repository: ghcr.io/MohamedOmarSkhiri/owl-agent
+    repository: ghcr.io/mohamedomarskhiri/owl-agent
     tag: ""
     pullPolicy: IfNotPresent
 

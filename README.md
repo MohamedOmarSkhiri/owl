@@ -29,7 +29,7 @@ Owl never changes your clusters and never reads Secrets.
 ## Install
 
 ```bash
-helm install owl oci://ghcr.io/MohamedOmarSkhiri/charts/owl -n owl --create-namespace
+helm install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --create-namespace
 kubectl -n owl get secret owl-tokens -o jsonpath='{.data.app-token}' | base64 -d; echo
 kubectl -n owl port-forward svc/owl-relay 2300:2300
 ```
@@ -37,14 +37,14 @@ kubectl -n owl port-forward svc/owl-relay 2300:2300
 Open http://localhost:2300 and sign in with the token. To publish it on the node instead (ports 2300 and 443 must be free on the node):
 
 ```bash
-helm upgrade owl oci://ghcr.io/MohamedOmarSkhiri/charts/owl -n owl --reuse-values --set service.type=LoadBalancer
+helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reuse-values --set service.type=LoadBalancer
 ```
 
 Watch another cluster too:
 
 ```bash
 kubectl config view --minify --flatten --context prod > prod.yaml
-helm upgrade owl oci://ghcr.io/MohamedOmarSkhiri/charts/owl -n owl --reuse-values \
+helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reuse-values \
   --set 'clusters[0].name=local' --set 'clusters[1].name=prod' --set-file 'clusters[1].kubeconfig=prod.yaml'
 ```
 
