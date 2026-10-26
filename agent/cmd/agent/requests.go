@@ -278,7 +278,7 @@ func (h *requestHandler) get(ctx context.Context, p map[string]string) (map[stri
 }
 
 // logs returns one container's log lines.
-//   - first call (no "since"): the last N lines (default 200, max 2000)
+//   - first call (no "since"): the last N lines (default 200, max 2000), or "tail=all" for the whole log
 //   - live calls ("since" = the "last" value of the previous answer): only the lines written after it
 //
 // "last" is the timestamp of the newest line; the web app sends it back on the next call.
@@ -287,6 +287,9 @@ func (h *requestHandler) logs(ctx context.Context, p map[string]string) (map[str
 		return nil, apierrors.NewBadRequest("namespace and name are required")
 	}
 	limit := int64(logLimitBytes)
+	if p["tail"] == "all" {
+		limit = downloadLimitBytes // download: the whole log, with a larger cap
+	}
 	opts := &corev1.PodLogOptions{
 		Container:  p["container"],
 		Timestamps: true,   // each line starts with its RFC 3339 time: that is our cursor
@@ -301,7 +304,7 @@ func (h *requestHandler) logs(ctx context.Context, p map[string]string) (map[str
 		since = t
 		st := metav1.NewTime(t) // the API only keeps whole seconds, splitLog drops what we already have
 		opts.SinceTime = &st
-	} else {
+	} else if p["tail"] != "all" {
 		tail := int64(200)
 		if v, err := strconv.ParseInt(p["tail"], 10, 64); err == nil && v > 0 {
 			tail = min(v, 2000)
@@ -323,7 +326,10 @@ func (h *requestHandler) logs(ctx context.Context, p map[string]string) (map[str
 	return map[string]any{"lines": lines, "last": last}, nil
 }
 
-const logLimitBytes = 1 << 20 // 1 MiB per answer
+const (
+	logLimitBytes      = 1 << 20 // 1 MiB per answer
+	downloadLimitBytes = 4 << 20 // 4 MiB for "tail=all" (the relay accepts answers up to 8 MiB)
+)
 
 // splitLog removes the timestamp in front of each line and keeps only lines newer than since
 // (zero since = keep all). It returns the text lines and the timestamp of the newest one.

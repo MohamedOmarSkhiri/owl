@@ -9,6 +9,7 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 - Usage tab: live CPU and memory per node, workload and pod against capacity, requests and limits (from metrics-server), and cluster CPU and memory in the header.
 - Live pod logs: new lines appear every second, with Live/Paused to stop following and read.
+- Download the whole log of a container, and the manifest of any resource as YAML or JSON. Manifests are shown as YAML by default.
 ## [0.3.0] - 2026-10-26
 
 First public release.

@@ -125,7 +125,7 @@ export const api = {
   get: (id: string, kind: ResourceKind, namespace: string | undefined, name: string) =>
     get<unknown>(`/v1/clusters/${c(id)}/resource`, { ...kindQuery(kind), namespace, name }),
   /** Without since: the last `tail` lines. With since (the previous answer's `last`): only newer lines. */
-  logs: (id: string, namespace: string, pod: string, container?: string, tail = 200, since?: string) =>
+  logs: (id: string, namespace: string, pod: string, container?: string, tail: number | 'all' = 200, since?: string) =>
     get<{ lines: string[]; last?: string }>(`/v1/clusters/${c(id)}/pods/${c(namespace)}/${c(pod)}/logs`, {
       container,
       tail: String(tail),
