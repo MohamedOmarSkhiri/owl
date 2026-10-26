@@ -3,10 +3,12 @@
 All notable changes to Owl. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org).
 
 ## [Unreleased]
-- Live pod logs: new lines appear every 2 seconds, with Live/Paused to stop following and read.
+## [0.4.0] - 2026-10-26
+
 ### Added
 
 - Usage tab: live CPU and memory per node, workload and pod against capacity, requests and limits (from metrics-server), and cluster CPU and memory in the header.
+- Live pod logs: new lines appear every second, with Live/Paused to stop following and read.
 ## [0.3.0] - 2026-10-26
 
 First public release.
