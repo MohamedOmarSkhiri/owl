@@ -111,4 +111,8 @@ jobs:
           echo "agent reports, relay proxies live requests, RBAC works"
       - name: Logs on failure
         if: failure()
-        run: kubectl -n owl logs -l app.kubernetes.io/instance=owl --all-containers --prefix --tail=100
+        run: |
+          kubectl -n owl get pods,svc,secrets -o wide || true
+          kubectl -n owl describe pods || true
+          kubectl -n owl get events --sort-by=.lastTimestamp || true
+          kubectl -n owl logs -l app.kubernetes.io/instance=owl --all-containers --prefix --tail=100 || true

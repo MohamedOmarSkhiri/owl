@@ -2,6 +2,7 @@
 # Build from the REPO ROOT:
 #   docker build -f relay/Dockerfile -t ghcr.io/<owner>/owl-relay:dev .
 
+# Used in a FROM line, so it must be declared before the first FROM (global scope).
 ARG GO_VERSION=1.27
 
 # 1. Web app: static files, same for every architecture, so build once on the build machine.
@@ -26,6 +27,6 @@ FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=relay /out/relay /relay
 COPY --from=web /web/dist /web
 ENV RELAY_WEB_DIR=/web
-USER nonroot:nonroot
+USER 65532:65532
 EXPOSE 2300 8443
 ENTRYPOINT ["/relay"]
