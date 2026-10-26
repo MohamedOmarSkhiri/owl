@@ -3,7 +3,17 @@
 All notable changes to Owl. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-10-26
+
+### Added
+
+- Download the whole log of a container, and the manifest of any resource as YAML or JSON. Manifests are shown as YAML by default.
+
 ## [0.4.0] - 2026-10-26
+### Added
+
+- Download the whole log of a container, and the manifest of any resource as YAML or JSON. Manifests are shown as YAML by default.
 
 ### Added
 
