@@ -207,7 +207,7 @@ func queryParams(names ...string) func(r *http.Request) map[string]string {
 }
 
 func logParams(r *http.Request) map[string]string {
-	p := queryParams("container", "tail")(r)
+	p := queryParams("container", "tail", "since")(r) // since: live mode cursor
 	p["namespace"] = r.PathValue("ns")
 	p["name"] = r.PathValue("name")
 	return p

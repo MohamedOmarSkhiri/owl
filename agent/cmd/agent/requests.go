@@ -277,26 +277,75 @@ func (h *requestHandler) get(ctx context.Context, p map[string]string) (map[stri
 	return u.Object, nil
 }
 
-// logs returns the last N lines of one container (default 200, max 2000).
+// logs returns one container's log lines.
+//   - first call (no "since"): the last N lines (default 200, max 2000)
+//   - live calls ("since" = the "last" value of the previous answer): only the lines written after it
+//
+// "last" is the timestamp of the newest line; the web app sends it back on the next call.
 func (h *requestHandler) logs(ctx context.Context, p map[string]string) (map[string]any, error) {
 	if p["namespace"] == "" || p["name"] == "" {
 		return nil, apierrors.NewBadRequest("namespace and name are required")
 	}
-	tail := int64(200)
-	if v, err := strconv.ParseInt(p["tail"], 10, 64); err == nil && v > 0 {
-		tail = min(v, 2000)
+	limit := int64(logLimitBytes)
+	opts := &corev1.PodLogOptions{
+		Container:  p["container"],
+		Timestamps: true,   // each line starts with its RFC 3339 time: that is our cursor
+		LimitBytes: &limit, // a noisy pod cannot flood the relay
 	}
-	opts := &corev1.PodLogOptions{TailLines: &tail, Container: p["container"]}
+	var since time.Time
+	if s := p["since"]; s != "" {
+		t, err := time.Parse(time.RFC3339Nano, s)
+		if err != nil {
+			return nil, apierrors.NewBadRequest("since must be an RFC 3339 time")
+		}
+		since = t
+		st := metav1.NewTime(t) // the API only keeps whole seconds, splitLog drops what we already have
+		opts.SinceTime = &st
+	} else {
+		tail := int64(200)
+		if v, err := strconv.ParseInt(p["tail"], 10, 64); err == nil && v > 0 {
+			tail = min(v, 2000)
+		}
+		opts.TailLines = &tail
+	}
 	raw, err := h.cs.CoreV1().Pods(p["namespace"]).GetLogs(p["name"], opts).DoRaw(ctx)
 	if err != nil {
 		return nil, err
 	}
-	text := strings.TrimRight(string(raw), "\n")
-	lines := []string{}
-	if text != "" {
-		lines = strings.Split(text, "\n")
+	lines, last := splitLog(string(raw), since)
+	if last == "" {
+		// Nothing new: keep the caller's cursor, or start from now (agent clock, close to the node's).
+		last = p["since"]
+		if last == "" {
+			last = time.Now().UTC().Format(time.RFC3339Nano)
+		}
 	}
-	return map[string]any{"lines": lines}, nil
+	return map[string]any{"lines": lines, "last": last}, nil
+}
+
+const logLimitBytes = 1 << 20 // 1 MiB per answer
+
+// splitLog removes the timestamp in front of each line and keeps only lines newer than since
+// (zero since = keep all). It returns the text lines and the timestamp of the newest one.
+func splitLog(raw string, since time.Time) (lines []string, last string) {
+	lines = []string{}
+	for _, l := range strings.Split(strings.TrimRight(raw, "\n"), "\n") {
+		if l == "" {
+			continue
+		}
+		ts, text, _ := strings.Cut(l, " ")
+		t, err := time.Parse(time.RFC3339Nano, ts)
+		if err != nil {
+			lines = append(lines, l) // no timestamp (should not happen): keep the line as is
+			continue
+		}
+		if !since.IsZero() && !t.After(since) {
+			continue // already sent in a previous answer
+		}
+		lines = append(lines, text)
+		last = ts
+	}
+	return lines, last
 }
 
 // summarize turns an object into a one-line status for the list screens.
