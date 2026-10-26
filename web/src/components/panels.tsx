@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Pause, Play, RefreshCw } from 'lucide-react'
+import { Download, Pause, Play, RefreshCw } from 'lucide-react'
 import { api, PODS, type ResourceKind } from '../api'
+import { saveFile, stamp, toYaml } from '../download'
 import { ErrorNote, Loading, Panel } from './ui'
 
 const TAILS = [100, 500, 2000]
-const LIVE_EVERY = 1_000 // live mode: ask the agent for new lines every 2 s
+const LIVE_EVERY = 1_000 // live mode: ask the agent for new lines every second
 const LIVE_MAX = 5_000 // keep at most this many live lines in the browser
 
 function Code({ text }: { text: string }) {
@@ -16,7 +17,41 @@ function Code({ text }: { text: string }) {
   )
 }
 
-/** A pod: container picker, last N log lines, and its JSON. */
+const btn = 'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-blue hover:bg-sunken disabled:opacity-50'
+
+/** An object's manifest as YAML (default, like kubectl) or JSON, with a download button. */
+function Manifest({ data, file }: { data: unknown; file: string }) {
+  const [format, setFormat] = useState<'yaml' | 'json'>('yaml')
+  const text = format === 'yaml' ? toYaml(data) : JSON.stringify(data, null, 2)
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-line px-5 py-2">
+        <div className="flex rounded-md border border-line p-0.5" role="group" aria-label="Format">
+          {(['yaml', 'json'] as const).map((f) => (
+            <button
+              key={f}
+              aria-pressed={format === f}
+              onClick={() => setFormat(f)}
+              className={`rounded px-2.5 py-0.5 text-xs uppercase ${format === f ? 'bg-sunken text-ink' : 'text-muted hover:text-ink'}`}
+            >
+              {f}
+            </button>
+          ))}
+        </div>
+        <button
+          onClick={() => saveFile(`${file}.${format}`, text, format === 'yaml' ? 'application/yaml' : 'application/json')}
+          className={`ml-auto ${btn}`}
+        >
+          <Download size={15} />
+          Download
+        </button>
+      </div>
+      <Code text={text} />
+    </>
+  )
+}
+
+/** A pod: container picker, last N log lines (live), and its manifest. */
 export function PodPanel({
   cluster,
   namespace,
@@ -58,7 +93,7 @@ export function PodPanel({
     cursor.current = logs.data?.last
   }, [logs.data])
 
-  // Every 2 s, ask only for lines newer than the cursor. setTimeout (not setInterval)
+  // Every second, ask only for lines newer than the cursor. setTimeout (not setInterval)
   // so a slow answer never overlaps the next request.
   useEffect(() => {
     if (!live || view !== 'logs' || !container || !logs.data) return
@@ -84,13 +119,37 @@ export function PodPanel({
 
   // Follow the end of the log while live, like kubectl logs -f. Pause to scroll back and read.
   useEffect(() => {
-    if (live) bottom.current?.scrollIntoView({ block: 'end' })
-  }, [live, more, logs.data])
+    if (live && view === 'logs') bottom.current?.scrollIntoView({ block: 'end' })
+  }, [live, view, more, logs.data])
+
+  // The manifest starts at its top, not where the logs were scrolled to.
+  const top = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (view === 'json') top.current?.scrollIntoView({ block: 'start' })
+  }, [view])
 
   const lines = [...(logs.data?.lines ?? []), ...more]
 
+  // Download the whole log of this container (not only the lines on screen), as kubectl logs would.
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string>()
+  const downloadLogs = async () => {
+    if (!container) return
+    setSaving(true)
+    setSaveError(undefined)
+    try {
+      const r = await api.logs(cluster, namespace, name, container, 'all')
+      saveFile(`${name}_${container}_${stamp()}.log`, r.lines.join('\n') + '\n')
+    } catch (err) {
+      setSaveError((err as Error).message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <Panel title={name} subtitle={`Pod in ${namespace}`} onClose={onClose}>
+      <div ref={top} />
       <div className="sticky top-0 z-10 flex flex-wrap items-center gap-2 border-b border-line bg-surface px-5 py-3">
         <div className="flex rounded-md border border-line p-0.5" role="tablist" aria-label="View">
           {(['logs', 'json'] as const).map((v) => (
@@ -101,7 +160,7 @@ export function PodPanel({
               onClick={() => setView(v)}
               className={`rounded px-3 py-1 text-sm ${view === v ? 'bg-blue text-white' : 'text-muted hover:text-ink'}`}
             >
-              {v === 'logs' ? 'Logs' : 'JSON'}
+              {v === 'logs' ? 'Logs' : 'Manifest'}
             </button>
           ))}
         </div>
@@ -161,16 +220,25 @@ export function PodPanel({
               <RefreshCw size={15} className={logs.isFetching ? 'animate-spin' : ''} />
               Reload
             </button>
+            <button onClick={downloadLogs} disabled={saving || !container} className={btn} title="Download the whole log">
+              <Download size={15} className={saving ? 'animate-pulse' : ''} />
+              Download
+            </button>
           </>
         )}
       </div>
+      {saveError && (
+        <p className="border-b border-line px-5 py-2 text-sm text-bad" role="alert">
+          Download failed: {saveError}
+        </p>
+      )}
       {view === 'json' ? (
         pod.isPending ? (
           <Loading />
         ) : pod.isError ? (
           <ErrorNote error={pod.error} onRetry={() => pod.refetch()} />
         ) : (
-          <Code text={JSON.stringify(pod.data, null, 2)} />
+          <Manifest data={pod.data} file={`${namespace}_pod_${name}`} />
         )
       ) : pod.isError ? (
         <ErrorNote error={pod.error} onRetry={() => pod.refetch()} />
@@ -190,7 +258,7 @@ export function PodPanel({
   )
 }
 
-/** Any other object: its full JSON (managedFields removed by the agent). */
+/** Any other object: its manifest as YAML or JSON (managedFields removed by the agent). */
 export function ObjectPanel({
   cluster,
   kind,
@@ -215,7 +283,7 @@ export function ObjectPanel({
       ) : q.isError ? (
         <ErrorNote error={q.error} onRetry={() => q.refetch()} />
       ) : (
-        <Code text={JSON.stringify(q.data, null, 2)} />
+        <Manifest data={q.data} file={`${namespace ? `${namespace}_` : ''}${kind.kind.toLowerCase()}_${name}`} />
       )}
     </Panel>
   )
