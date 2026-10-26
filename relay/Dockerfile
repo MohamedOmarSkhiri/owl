@@ -2,6 +2,8 @@
 # Build from the REPO ROOT:
 #   docker build -f relay/Dockerfile -t ghcr.io/<owner>/owl-relay:dev .
 
+ARG GO_VERSION=1.27
+
 # 1. Web app: static files, same for every architecture, so build once on the build machine.
 FROM --platform=$BUILDPLATFORM node:22-alpine AS web
 WORKDIR /web
@@ -11,7 +13,6 @@ COPY web/ ./
 RUN npm run build
 
 # 2. Relay: Go cross-compiles for the target architecture (no emulation).
-ARG GO_VERSION=1.27
 FROM --platform=$BUILDPLATFORM golang:${GO_VERSION} AS relay
 ARG TARGETOS TARGETARCH VERSION=dev
 WORKDIR /src
