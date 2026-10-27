@@ -251,6 +251,9 @@ func TestHistorySurvivesSaveAndLoad(t *testing.T) {
 	if a, b := len(st.History("c", time.Hour)), len(fresh.History("c", time.Hour)); a != b || a < 100 {
 		t.Fatalf("points before %d, after %d", a, b)
 	}
+	if !fresh.HasHistory("c") || fresh.ClusterExists("c") { // known by its history before the agent reports
+		t.Fatal("after a restart the cluster must be known by its history alone")
+	}
 	if n, err := NewStore().LoadHistory(t.TempDir()); err != nil || n != 0 { // first start: no file yet
 		t.Fatalf("empty dir: %d, %v", n, err)
 	}

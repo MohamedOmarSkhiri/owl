@@ -135,9 +135,12 @@ jobs:
           kubectl -n owl rollout restart deploy/owl-relay              # old pod saves on SIGTERM
           kubectl -n owl rollout status deploy/owl-relay --timeout 2m  # new pod loads the file
           kubectl -n owl port-forward svc/owl-relay 2310:2300 &
-          sleep 3
-          after=$(points); echo "points after restart: $after"
-          test "$after" -ge "$before"                                  # without the volume it would start at 0
+          after=""
+          for i in $(seq 1 20); do                                     # port-forward and relay need a moment
+            after=$(points); [ -n "$after" ] && break; sleep 2
+          done
+          echo "points after restart: $after"
+          test "${after:-0}" -ge "$before"                             # without the volume it would start at 0 or 1
       - name: Logs on failure
         if: failure()
         run: |

@@ -183,10 +183,18 @@ func (s *Store) History(cluster string, d time.Duration) []HistoryPoint {
 	return out
 }
 
+// HasHistory: the relay has history for this cluster, reported since it started or loaded
+// from disk. Right after a restart, history is there before the agent's next report.
+func (s *Store) HasHistory(cluster string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.history[cluster] != nil
+}
+
 // GET /v1/clusters/{id}/history?minutes=60 (1 minute to 60 days).
 func (s *server) getHistory(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if !s.store.ClusterExists(id) {
+	if !s.store.ClusterExists(id) && !s.store.HasHistory(id) {
 		writeErr(w, http.StatusNotFound, "unknown cluster")
 		return
 	}
