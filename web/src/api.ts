@@ -91,7 +91,7 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string, query?: Record<string, string | undefined>): Promise<T> {
+async function get<T>(path: string, query?: Record<string, string | undefined>, method = 'GET'): Promise<T> {
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(query ?? {})) if (v) params.set(k, v)
   const url = params.size ? `${path}?${params}` : path
@@ -99,6 +99,7 @@ async function get<T>(path: string, query?: Record<string, string | undefined>):
   let res: Response
   try {
     res = await fetch(url, {
+      method,
       headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     })
   } catch {
@@ -142,8 +143,12 @@ export const api = {
   /** CPU, memory, pods and problems over the last `minutes` (kept by the relay, at most 60 days). */
   history: (id: string, minutes: number) =>
     get<HistoryPoint[]>(`/v1/clusters/${c(id)}/history`, { minutes: String(minutes) }),
-  /** Relay version, for the footer. */
   info: () => get<{ version: string; persistent?: boolean }>('/v1/info'),
+  /** Relay version, for the footer. */
+  /** Which notification channels are on (secrets are never sent). */
+  notifications: () => get<NotifyStatus>('/v1/notifications'),
+  /** Sends a test message to every channel now; one result per channel. */
+  testNotifications: () => get<NotifyChannel[]>('/v1/notifications/test', undefined, 'POST'),
   /** Validates a token without storing it. */
   check: async (token: string) => {
     const res = await fetch('/v1/clusters', { headers: { Authorization: `Bearer ${token}` } })
@@ -250,4 +255,21 @@ export interface HistoryPoint {
 /** Share of capacity in use, 0–100, or null when unknown. */
 export function percent(used?: number, total?: number): number | null {
   return used === undefined || !total ? null : Math.round((used / total) * 100)
+}
+// ---------- Notifications (configured in the Helm chart, shown and tested in the app) ----------
+
+export interface NotifyChannel {
+  name: 'telegram' | 'slack' | 'discord' | 'webhook'
+  target: string // e.g. "chat 42" or "hooks.slack.com/…": never the secret part
+  ok?: boolean // test results only
+  error?: string
+}
+
+export interface NotifyStatus {
+  enabled: boolean
+  channels: NotifyChannel[]
+  minSeverity?: 'critical' | 'warning'
+  resolved?: boolean
+  cooldown?: string // Go duration, e.g. "10m0s"
+  publicUrl?: string
 }

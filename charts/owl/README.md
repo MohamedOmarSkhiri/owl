@@ -29,7 +29,7 @@ Each entry in `clusters` runs one agent.
 Kubeconfigs must embed their credentials. Exec plugins (`aws`, `gke-gcloud-auth-plugin`, `kubelogin`) cannot run in the agent image.
 
 ```bash
-helm upgrade --install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reuse-values \
+helm upgrade --install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reset-then-reuse-values \
   --set 'clusters[0].name=local' \
   --set 'clusters[1].name=prod' --set-file 'clusters[1].kubeconfig=./prod.yaml'
 ```
@@ -58,6 +58,26 @@ sudo chown 65532:65532 /exports/owl        # or in /etc/exports: (rw,all_squash,
 ```
 
 If the folder is not writable, the relay stops at start with a message saying so.
+## Notifications
+
+Owl sends a message when a problem opens, resolves or comes back, and when a cluster goes down (its agent stops reporting) or comes back. Turn on any of these channels; test them from the app with the bell icon at the bottom of the sidebar.
+
+**Telegram.** Create a bot with [@BotFather](https://t.me/BotFather) (`/newbot`), send it any message, then read your chat id:
+
+```bash
+curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"chat":{"id":-\?[0-9]*'
+helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reset-then-reuse-values \
+  --set notifications.telegram.token=<TOKEN> --set notifications.telegram.chatId=<CHAT_ID> \
+  --set notifications.publicUrl=https://owl.example.com
+```
+
+**Slack** ([incoming webhook](https://api.slack.com/messaging/webhooks)): `--set notifications.slack.webhookUrl=https://hooks.slack.com/services/…`
+**Discord** (channel settings → Integrations → Webhooks): `--set notifications.discord.webhookUrl=https://discord.com/api/webhooks/…`
+**Any tool** (n8n, Home Assistant, your own service): `--set notifications.webhook.url=https://…` receives `{"alert": {...}, "text": "..."}` as JSON.
+
+Tokens and webhook URLs go into a Secret created by the chart. To keep them out of Helm values (GitOps), create the Secret yourself with any of the keys `telegram-token`, `slack-webhook`, `discord-webhook`, `webhook-url` and set `notifications.existingSecret`.
+
+By default only critical problems are sent: CrashLoopBackOff, ImagePullBackOff and other container start errors, OOMKilled, failed pods, and a cluster going down. `minSeverity: warning` also sends pods pending for more than 5 minutes and Kubernetes warning events, which is much busier. The same problem sends at most one message per `cooldown` (10 minutes).
 
 ## Values
 
@@ -96,6 +116,15 @@ If the folder is not writable, the relay stops at start with a message saying so
 | `relay.persistence.pv.nfs.server`, `.path` | `""` | An NFS export writable by uid 65532 |
 | `relay.persistence.pv.reclaimPolicy` | `Retain` | Keep the data when the claim is deleted |
 | `relay.resources`, `.nodeSelector`, `.tolerations`, `.affinity` | | |
+| `notifications.publicUrl` | `""` | How you open Owl; messages link to the problem |
+| `notifications.minSeverity` | `critical` | `critical` or `warning` |
+| `notifications.resolved` | `true` | Also send "resolved" and "cluster is back" |
+| `notifications.cooldown` | `10m` | At most one message per problem and state in this time |
+| `notifications.telegram.token`, `.chatId` | `""` | Telegram bot |
+| `notifications.slack.webhookUrl` | `""` | Slack incoming webhook |
+| `notifications.discord.webhookUrl` | `""` | Discord webhook |
+| `notifications.webhook.url` | `""` | Any URL, receives the alert as JSON |
+| `notifications.existingSecret` | `""` | Your Secret with `telegram-token`, `slack-webhook`, `discord-webhook`, `webhook-url` |
 | `agent.resources`, `.nodeSelector`, `.tolerations`, `.affinity` | | |
 
 ## Notes

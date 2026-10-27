@@ -76,6 +76,10 @@ jobs:
             --set relay.persistence.pv.hostPath=/var/lib/owl --set relay.persistence.pv.node=node-1 > /dev/null
           helm template owl charts/owl -n owl --set relay.persistence.pv.enabled=true \
             --set relay.persistence.pv.nfs.server=10.0.0.1 --set relay.persistence.pv.nfs.path=/exports/owl > /dev/null
+          helm template owl charts/owl -n owl --set notifications.telegram.token=1:x --set notifications.telegram.chatId=1 \
+            --set notifications.webhook.url=https://example.com --set notifications.publicUrl=https://owl.example.com \
+            | grep -q 'name: RELAY_NOTIFY_TELEGRAM_TOKEN'
+          helm template owl charts/owl -n owl --set notifications.existingSecret=mine | grep -q 'name: mine'
           if helm template owl charts/owl -n owl --set relay.persistence.pv.enabled=true > /dev/null 2>&1; then
             echo "::error::pv.enabled without a path must fail"; exit 1
           fi
@@ -122,6 +126,7 @@ jobs:
           curl -sf -H "Authorization: Bearer $TOKEN" \
             'http://localhost:2300/v1/clusters/local/history?minutes=5' | grep -q '"running"'
           curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/info | grep -q '"persistent":true'
+          curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/notifications | grep -q '"enabled":false'
           echo "agent reports, relay proxies live requests, RBAC works, usage and history answer"
       - name: History survives a relay restart
         run: |

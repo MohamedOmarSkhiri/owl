@@ -124,3 +124,21 @@ agent:
   nodeSelector: {}
   tolerations: []
   affinity: {}
+  
+# Messages when a problem opens or resolves, and when a cluster goes down or comes back.
+# Turn on one or more channels below; the others stay off. Test them from the app (bell icon).
+notifications:
+  publicUrl: ""          # how you open Owl, e.g. https://owl.example.com: messages link to the problem
+  minSeverity: critical  # critical | warning (warning also sends warning events: much busier)
+  resolved: true         # also send "resolved" and "cluster is back"
+  cooldown: 10m          # at most one message per problem and state in this time
+  existingSecret: ""     # your own Secret with any of: telegram-token, slack-webhook, discord-webhook, webhook-url
+  telegram:
+    token: ""            # from @BotFather
+    chatId: ""           # your chat, group or channel id
+  slack:
+    webhookUrl: ""       # Slack incoming webhook
+  discord:
+    webhookUrl: ""       # Discord channel webhook
+  webhook:
+    url: ""              # any URL: receives the alert as JSON

@@ -1,12 +1,12 @@
 // Sidebar: clusters with their health at a glance, the sections of the open cluster,
 // "watch another cluster", and a footer (theme, project link, version).
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { NavLink } from 'react-router'
-import { Check, Copy, ExternalLink, LogOut, Monitor, Moon, Plus, Sun } from 'lucide-react'
-import { api, percent, type Cluster } from '../api'
+import { Bell, BellOff, Check, CircleCheck, CircleX, Copy, ExternalLink, LogOut, Monitor, Moon, Plus, Sun } from 'lucide-react'
+import { api, percent, type Cluster, type NotifyStatus } from '../api'
 import { getTheme, setTheme, type Theme } from '../theme'
-import { HealthDot, inputClass, OwlMark, Panel } from './ui'
+import { ErrorNote, HealthDot, inputClass, Loading, OwlMark, Panel } from './ui'
 
 /** The sections of a cluster, in order. `count` feeds the small number next to the label. */
 export const SECTIONS = [
@@ -111,7 +111,7 @@ function AddClusterPanel({ index, onClose }: { index: number; onClose: () => voi
           <p className="mt-1 text-muted">A new agent starts in this cluster and watches the other one through the kubeconfig.</p>
           <div className="mt-2">
             <Command
-              text={`helm upgrade owl ${CHART} -n owl --reuse-values \\\n  --set 'clusters[${index}].name=${n}' \\\n  --set-file 'clusters[${index}].kubeconfig=${n}.yaml'`}
+              text={`helm upgrade owl ${CHART} -n owl --reset-then-reuse-values \\\n  --set 'clusters[${index}].name=${n}' \\\n  --set-file 'clusters[${index}].kubeconfig=${n}.yaml'`}
             />
           </div>
         </div>
@@ -119,6 +119,121 @@ function AddClusterPanel({ index, onClose }: { index: number; onClose: () => voi
           It appears in the sidebar within 15 seconds. Release name or namespace different from <code>owl</code>? Change them
           in the command.
         </p>
+      </div>
+    </Panel>
+  )
+}
+
+const CHANNEL_NAMES = { telegram: 'Telegram', slack: 'Slack', discord: 'Discord', webhook: 'Webhook' }
+
+/** "10m0s" (Go) -> "10 minutes" */
+function duration(go = '10m0s') {
+  const h = Number(/(\d+)h/.exec(go)?.[1] ?? 0)
+  const m = Number(/(\d+)m(?!s)/.exec(go)?.[1] ?? 0)
+  const total = h * 60 + m
+  if (total === 0) return go
+  return total % 60 === 0 ? `${total / 60} hour${total === 60 ? '' : 's'}` : `${total} minute${total === 1 ? '' : 's'}`
+}
+
+/** What is sent, where, and a test button. Set up happens in the Helm chart, so secrets stay in a Secret. */
+function NotificationsPanel({ status, onClose }: { status: NotifyStatus | undefined; onClose: () => void }) {
+  const test = useMutation({ mutationFn: api.testNotifications })
+  return (
+    <Panel title="Notifications" subtitle="A message when a problem opens or a cluster goes down" onClose={onClose} wide={false}>
+      <div className="space-y-6 p-5 text-sm">
+        {!status ? (
+          <Loading />
+        ) : status.enabled ? (
+          <>
+            <section>
+              <h3 className="font-medium">Sending to</h3>
+              <ul className="mt-2 divide-y divide-line rounded-lg border border-line">
+                {status.channels.map((c) => (
+                  <li key={c.name} className="flex items-baseline justify-between gap-3 px-3 py-2">
+                    <span className="font-medium">{CHANNEL_NAMES[c.name] ?? c.name}</span>
+                    <span className="truncate text-muted">{c.target}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+            <section className="space-y-1.5 text-muted">
+              <p>
+                {status.minSeverity === 'warning' ? 'Critical and warning problems' : 'Critical problems'}
+                {status.resolved ? ', when they are resolved, ' : ' '}
+                and clusters going down{status.resolved ? ' or coming back' : ''}.
+              </p>
+              <p>At most one message per problem every {duration(status.cooldown)}.</p>
+              <p>
+                {status.publicUrl ? (
+                  <>Messages link to {status.publicUrl}.</>
+                ) : (
+                  <>Set notifications.publicUrl in the chart so messages link to the problem in Owl.</>
+                )}
+              </p>
+            </section>
+            <section>
+              <button
+                onClick={() => test.mutate()}
+                disabled={test.isPending}
+                className="h-10 w-full rounded-md bg-blue font-medium text-white hover:bg-blue-strong disabled:opacity-60"
+              >
+                {test.isPending ? 'Sending…' : 'Send a test message'}
+              </button>
+              {test.isError && <ErrorNote error={test.error} />}
+              {test.data && (
+                <ul className="mt-3 space-y-1.5" aria-live="polite">
+                  {test.data.map((r) => (
+                    <li key={r.name} className="flex items-start gap-2">
+                      {r.ok ? (
+                        <CircleCheck size={17} className="mt-px shrink-0 text-ok" aria-label="Sent" />
+                      ) : (
+                        <CircleX size={17} className="mt-px shrink-0 text-bad" aria-label="Failed" />
+                      )}
+                      <span>
+                        <span className="font-medium">{CHANNEL_NAMES[r.name] ?? r.name}</span>
+                        <span className="text-muted">{r.ok ? ': sent, check your app' : `: ${r.error}`}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          </>
+        ) : (
+          <>
+            <p className="text-muted">
+              No channel is set up yet. Notifications are set in the Helm chart, so tokens stay in a Kubernetes Secret.
+              Telegram takes two minutes:
+            </p>
+            <div>
+              <p className="font-medium">1. Create a bot</p>
+              <p className="mt-1 text-muted">
+                In Telegram, talk to @BotFather, send /newbot and copy the token. Then send any message to your new bot.
+              </p>
+            </div>
+            <div>
+              <p className="font-medium">2. Find your chat id</p>
+              <div className="mt-2">
+                <Command text={`curl -s "https://api.telegram.org/bot<TOKEN>/getUpdates" | grep -o '"chat":{"id":-\\?[0-9]*'`} />
+              </div>
+            </div>
+            <div>
+              <p className="font-medium">3. Turn it on</p>
+              <div className="mt-2">
+                <Command
+                  text={`helm upgrade owl ${CHART} -n owl --reset-then-reuse-values \\\n  --set notifications.telegram.token=<TOKEN> \\\n  --set notifications.telegram.chatId=<CHAT_ID> \\\n  --set notifications.publicUrl=${window.location.origin}`}
+                />
+              </div>
+            </div>
+            <p className="text-muted">
+              Slack, Discord or any webhook:{' '}
+              <a href={`${REPO}/tree/main/charts/owl#notifications`} target="_blank" rel="noreferrer" className="text-blue hover:underline">
+                see the chart README
+              </a>
+              .
+            </p>
+          </>
+        )}
       </div>
     </Panel>
   )
@@ -136,6 +251,9 @@ export function Sidebar({
   onSignOut: () => void
 }) {
   const [adding, setAdding] = useState(false)
+  const [bell, setBell] = useState(false)
+  // Older relays have no /v1/notifications: the bell then opens the set-up help.
+  const notify = useQuery({ queryKey: ['notifications'], queryFn: api.notifications, staleTime: 60_000, retry: false })
   // Older relays have no /v1/info: the version is simply not shown.
   const info = useQuery({ queryKey: ['info'], queryFn: api.info, staleTime: Infinity, retry: false })
 
@@ -225,6 +343,14 @@ export function Sidebar({
 
       <footer className="mt-auto hidden items-center gap-3 border-t border-line px-5 py-3 text-xs text-muted md:flex">
         <ThemeSwitch />
+        <button
+          onClick={() => setBell(true)}
+          className="rounded p-1 hover:bg-sunken hover:text-ink"
+          aria-label="Notifications"
+          title={notify.data?.enabled ? 'Notifications are on' : 'Notifications are off'}
+        >
+          {notify.data?.enabled ? <Bell size={15} className="text-ok" /> : <BellOff size={15} />}
+        </button>
         <a href={REPO} target="_blank" rel="noreferrer" className="flex items-center gap-1 hover:text-ink">
           GitHub
           <ExternalLink size={12} />
@@ -233,6 +359,12 @@ export function Sidebar({
       </footer>
 
       {adding && <AddClusterPanel index={clusters.length} onClose={() => setAdding(false)} />}
+      {bell && (
+        <NotificationsPanel
+          status={notify.data ?? (notify.isError ? { enabled: false, channels: [] } : undefined)}
+          onClose={() => setBell(false)}
+        />
+      )}
     </aside>
   )
 }

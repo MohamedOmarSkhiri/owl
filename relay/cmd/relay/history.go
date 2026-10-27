@@ -207,7 +207,7 @@ func (s *server) getHistory(w http.ResponseWriter, r *http.Request) {
 
 // GET /v1/info: relay version (footer, bug reports) and whether history survives restarts.
 func (s *server) getInfo(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"version": version, "persistent": s.dataDir != ""})
+	writeJSON(w, http.StatusOK, map[string]any{"version": version, "persistent": s.persistent})
 }
 
 // seedHistory fills 60 days of made-up snapshots for the --seed demo: a daily rhythm,

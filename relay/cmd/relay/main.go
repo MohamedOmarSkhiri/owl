@@ -63,9 +63,11 @@ func decode(r *http.Request, v any) error {
 }
 
 type server struct {
-	store   *Store
-	broker  *Broker
-	dataDir string // where the history is saved; empty = memory only
+	store      *Store
+	broker     *Broker
+	dataDir    string    // where the history is saved; empty = memory only
+	persistent bool      // dataDir is on a real volume (the chart says false for an emptyDir)
+	notify     *Notifier // nil or without channels = notifications off
 }
 
 // --- agent API ---
@@ -104,7 +106,9 @@ func (s *server) postProblem(w http.ResponseWriter, r *http.Request) {
 			state = "RESOLVED"
 		}
 		// Push notification hook goes here in the push step.
-		log.Printf("notify %s %s %s/%s %s", state, p.Cluster, p.Namespace, p.Object, p.Reason)
+		log.Printf("problem %s %s %s/%s %s", state, p.Cluster, p.Namespace, p.Object, p.Reason)
+		s.notify.Problem(p) // filtered (severity, cooldown) and sent in the background
+
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -258,7 +262,8 @@ func main() {
 		log.Fatal("set RELAY_AGENT_TOKEN and RELAY_APP_TOKEN (e.g. export RELAY_APP_TOKEN=$(openssl rand -hex 16))")
 	}
 
-	s := &server{store: NewStore(), broker: NewBroker(), dataDir: *dataDir}
+	s := &server{store: NewStore(), broker: NewBroker(), dataDir: *dataDir, notify: notifierFromEnv()}
+	s.persistent = s.dataDir != "" && os.Getenv("RELAY_PERSISTENT") != "false"
 	if s.dataDir != "" {
 		if err := CheckWritable(s.dataDir); err != nil {
 			log.Fatalf("history: %v", err)
@@ -296,7 +301,8 @@ func main() {
 	mux.HandleFunc("GET /v1/clusters", requireToken(appToken, s.getClusters))
 	mux.HandleFunc("GET /v1/clusters/{id}/problems", requireToken(appToken, s.getProblems))
 	mux.HandleFunc("GET /v1/clusters/{id}/history", requireToken(appToken, s.getHistory))
-	mux.HandleFunc("GET /v1/info", requireToken(appToken, s.getInfo))
+	mux.HandleFunc("GET /v1/notifications", requireToken(appToken, s.getNotifications))
+	mux.HandleFunc("POST /v1/notifications/test", requireToken(appToken, s.testNotifications))
 	// Live data, answered by the cluster's agent:
 	mux.HandleFunc("GET /v1/clusters/{id}/kinds", requireToken(appToken, s.proxy("kinds", nil)))
 	mux.HandleFunc("GET /v1/clusters/{id}/resources", requireToken(appToken,
@@ -347,6 +353,17 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if s.notify.enabled() {
+		names := []string{}
+		for _, ch := range s.notify.channels {
+			names = append(names, ch.Name())
+		}
+		log.Printf("notifications: %s, from severity %s", strings.Join(names, ", "), s.notify.minSeverity)
+		go s.notify.run(ctx)                    // sends what is queued
+		go s.notify.watchClusters(ctx, s.store) // cluster down / back, every 30 s
+	} else {
+		log.Print("notifications: off (set notifications.* in the chart to turn them on)")
+	}
 	<-ctx.Done()
 	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

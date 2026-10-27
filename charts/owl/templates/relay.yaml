@@ -17,6 +17,8 @@ spec:
       labels:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app.kubernetes.io/component: relay
+      annotations:   # a new token or webhook in values restarts the relay, so it reads it
+        checksum/notify: {{ toJson .Values.notifications | sha256sum | trunc 16 }}
     spec:
       automountServiceAccountToken: false   # the relay never talks to the Kubernetes API
       {{- with .Values.imagePullSecrets }}
@@ -35,6 +37,27 @@ spec:
           env:
             - {name: RELAY_LISTEN, value: ":2300"}
             - {name: RELAY_DATA_DIR, value: /data}   # history file, see relay.persistence
+            {{- if not .Values.relay.persistence.enabled }}
+            - {name: RELAY_PERSISTENT, value: "false"}   # emptyDir: the app warns that history is lost on restart
+            {{- end }}
+            {{- $n := .Values.notifications | default dict }}
+            {{- with $n.publicUrl }}
+            - {name: RELAY_PUBLIC_URL, value: {{ . | quote }}}
+            {{- end }}
+            - {name: RELAY_NOTIFY_MIN_SEVERITY, value: {{ $n.minSeverity | default "critical" | quote }}}
+            - {name: RELAY_NOTIFY_RESOLVED, value: {{ ne (toString $n.resolved) "false" | quote }}}
+            - {name: RELAY_NOTIFY_COOLDOWN, value: {{ $n.cooldown | default "10m" | quote }}}
+            {{- with dig "telegram" "chatId" "" $n }}
+            - {name: RELAY_NOTIFY_TELEGRAM_CHAT_ID, value: {{ . | quote }}}
+            {{- end }}
+            {{- if include "owl.notify.hasSecret" . }}
+            {{- $secret := include "owl.notify.secretName" . }}
+            {{- range $key, $env := dict "telegram-token" "RELAY_NOTIFY_TELEGRAM_TOKEN" "slack-webhook" "RELAY_NOTIFY_SLACK_WEBHOOK" "discord-webhook" "RELAY_NOTIFY_DISCORD_WEBHOOK" "webhook-url" "RELAY_NOTIFY_WEBHOOK_URL" }}
+            - name: {{ $env }}
+              valueFrom: {secretKeyRef: {name: {{ $secret }}, key: {{ $key }}, optional: true}}   # optional: unset keys stay unset
+            {{- end }}
+            {{- end }}
+
             {{- if .Values.tls.enabled }}
             - {name: RELAY_TLS_LISTEN, value: ":8443"}
             - {name: RELAY_TLS_CERT, value: /tls/tls.crt}

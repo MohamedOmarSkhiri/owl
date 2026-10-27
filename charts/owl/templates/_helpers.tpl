@@ -32,6 +32,16 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- end -}}
 {{- end -}}
 
+{{/* Notifications: the Secret with the tokens, and whether there is one at all. */}}
+{{- define "owl.notify.secretName" -}}
+{{- $n := .Values.notifications | default dict -}}
+{{- default (printf "%s-notify" (include "owl.fullname" .)) $n.existingSecret -}}
+{{- end -}}
+{{- define "owl.notify.hasSecret" -}}
+{{- $n := .Values.notifications | default dict -}}
+{{- if or $n.existingSecret (dig "telegram" "token" "" $n) (dig "slack" "webhookUrl" "" $n) (dig "discord" "webhookUrl" "" $n) (dig "webhook" "url" "" $n) -}}true{{- end -}}
+{{- end -}}
+
 {{- define "owl.podSecurity" -}}
 runAsNonRoot: true
 runAsUser: 65532      # distroless "nonroot"; must be numeric for the kubelet to verify runAsNonRoot

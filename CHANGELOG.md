@@ -1,6 +1,17 @@
 # Changelog
 
 All notable changes to Owl. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org).
+## [0.8.0] - 2026-10-27
+
+### Added
+
+- Notifications: a message on Telegram, Slack, Discord or any webhook when a problem opens, resolves or comes back, and when a cluster goes down or comes back. Critical problems only by default (`notifications.minSeverity`), at most one message per problem every 10 minutes (`notifications.cooldown`), with a link to the problem when `notifications.publicUrl` is set. Tokens are kept in a Secret, or your own (`notifications.existingSecret`).
+- Notifications panel (bell at the bottom of the sidebar): which channels are on, what is sent, a test button, and how to set up Telegram.
+
+### Fixed
+
+- The Overview no longer says the history is kept for 60 days when the relay has no volume (`relay.persistence.enabled=false`).
+- Upgrade commands in the docs and the app use `--reset-then-reuse-values`: with `--reuse-values`, an upgrade does not pick up settings added by the new chart version (such as `relay.persistence` in 0.7.0).
 
 ## [Unreleased]
 

@@ -8,9 +8,9 @@
 
 Owl is a small, self-hosted dashboard for Kubernetes and K3s. Install it with Helm, open it on port 2300 (HTTP) or 443 (HTTPS), and see:
 
-- **Problems**: CrashLoopBackOff, ImagePullBackOff, OOMKilled, long-pending pods, warning events, Alertmanager alerts
-- **Pods**: status, ready containers, restarts and age for every pod, filtered by namespace; open any pod to read its logs
-- **Explore**: pick a namespace and a resource type (Deployments, Services, Ingresses, CRDs such as HTTPRoute) and read any object as JSON
+- **Problems**: CrashLoopBackOff, ImagePullBackOff, OOMKilled, failed and long-pending pods, warning events
+- **Pods**: status, restarts (and when), age; open any pod for live logs, download them, or read its YAML
+- **Explore**: any resource type in any namespace, CRDs included (HTTPRoute, Certificate, Application…), as YAML or JSON
 - **Many clusters in one place**: the cluster Owl runs in, plus any other cluster you give it a kubeconfig for
 
 Owl never changes your clusters and never reads Secrets.
@@ -23,8 +23,8 @@ Owl never changes your clusters and never reads Secrets.
                                 └──────────────── agent ──▶ another cluster (kubeconfig you provide)
 ```
 
-- **relay**: serves the web app and the API, and checks the sign-in token.
-- **agent**: one per cluster. Watches pods, nodes and events, reports problems, and answers live requests (resource lists, logs). It only makes outbound calls to the relay.
+- **relay**: serves the web app and the API, checks the sign-in token, keeps the 60-day history on a volume and sends notifications.
+- **agent**: one per cluster. Watches pods, nodes and events, reports problems and CPU and memory, and answers live requests (resource lists, logs). It only makes outbound calls to the relay.
 
 ## Install
 
@@ -37,14 +37,14 @@ kubectl -n owl port-forward svc/owl-relay 2300:2300
 Open http://localhost:2300 and sign in with the token. To publish it on the node instead (ports 2300 and 443 must be free on the node):
 
 ```bash
-helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reuse-values --set service.type=LoadBalancer
+helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl -reset-then-reuse-values --set service.type=LoadBalancer
 ```
 
 Watch another cluster too:
 
 ```bash
 kubectl config view --minify --flatten --context prod > prod.yaml
-helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reuse-values \
+helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl -reset-then-reuse-values \
   --set 'clusters[0].name=local' --set 'clusters[1].name=prod' --set-file 'clusters[1].kubeconfig=prod.yaml'
 ```
 
