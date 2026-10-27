@@ -16,10 +16,12 @@ type Snapshot struct {
 		Ready int `json:"ready"`
 	} `json:"nodes"`
 	Pods struct {
-		Total   int `json:"total"`
-		Running int `json:"running"`
-		Failing int `json:"failing"`
+		Total     int `json:"total"`
+		Running   int `json:"running"`
+		Completed int `json:"completed"`
+		Failing   int `json:"failing"`
 	} `json:"pods"`
+	Usage *UsageTotals `json:"usage,omitempty"` // nil when the cluster has no metrics-server
 }
 
 // Problem is one open or resolved issue reported by an agent.
@@ -49,6 +51,10 @@ type ClusterView struct {
 	PodsRunning int       `json:"podsRunning"`
 	PodsFailing int       `json:"podsFailing"`
 	LastSeen    time.Time `json:"lastSeen"`
+	// Added in 0.6.0 for the sidebar and the Overview.
+	PodsCompleted int          `json:"podsCompleted"`
+	ProblemsOpen  int          `json:"problemsOpen"`
+	Usage         *UsageTotals `json:"usage,omitempty"`
 }
 
 // staleAfter: a cluster whose agent has been silent this long is shown as down.
@@ -59,12 +65,14 @@ type Store struct {
 	mu        sync.RWMutex
 	snapshots map[string]Snapshot
 	problems  map[string]map[string]Problem // cluster -> problem key -> problem
+	history   map[string][]HistoryPoint     // cluster -> last 6 hours, oldest first (history.go)
 }
 
 func NewStore() *Store {
 	return &Store{
 		snapshots: map[string]Snapshot{},
 		problems:  map[string]map[string]Problem{},
+		history:   map[string][]HistoryPoint{},
 	}
 }
 
@@ -79,6 +87,7 @@ func (s *Store) PutSnapshot(snap Snapshot) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snapshots[snap.Cluster] = snap
+	s.recordLocked(snap)
 }
 
 // Touch marks a cluster's latest snapshot as fresh (used by the demo heartbeat).
@@ -140,7 +149,10 @@ func (s *Store) Clusters() []ClusterView {
 			ID: id, Name: id, K8sVersion: snap.K8sVersion,
 			NodesTotal: snap.Nodes.Total, NodesReady: snap.Nodes.Ready,
 			PodsTotal: snap.Pods.Total, PodsRunning: snap.Pods.Running, PodsFailing: snap.Pods.Failing,
-			LastSeen: snap.Ts,
+			LastSeen:      snap.Ts,
+			PodsCompleted: snap.Pods.Completed,
+			ProblemsOpen:  s.openProblemsLocked(id),
+			Usage:         snap.Usage,
 		}
 		v.Health = s.healthLocked(id, snap)
 		out = append(out, v)

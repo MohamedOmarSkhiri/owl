@@ -18,11 +18,15 @@
   --color-warn-soft: #f59e0b;
   --color-bad: #dc2626;
   --color-amber: #fbbf24;
+  /* Chart series (CPU, memory): checked for colour blindness and contrast on both themes. */
+  --color-series-1: #2a78d6;
+  --color-series-2: #eb6834;
 }
 
-/* Night watch: deep navy rather than black. */
+/* Night watch: deep navy rather than black.
+   Dark follows the system unless the user picked a theme (<html data-theme>, see theme.ts). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --color-ground: #0e1630;
     --color-surface: #15203f;
     --color-sunken: #0b1228;
@@ -34,7 +38,26 @@
     --color-ok: #34d399;
     --color-warn: #fbbf24;
     --color-bad: #f87171;
+    --color-series-1: #3987e5;
+    --color-series-2: #d95926;
+    color-scheme: dark;
   }
+}
+:root[data-theme="dark"] {
+  --color-ground: #0e1630;
+  --color-surface: #15203f;
+  --color-sunken: #0b1228;
+  --color-line: #26345c;
+  --color-ink: #e6ecfb;
+  --color-muted: #9aa8c9;
+  --color-blue: #6d9bff;
+  --color-blue-strong: #9cbcff;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #f87171;
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  color-scheme: dark;
 }
 
 html,
@@ -69,8 +92,31 @@ body {
   animation: pulse-reveal 1.1s ease-out both;
 }
 
+/* The owl blinks on the sign-in page: each eye squeezes shut and opens again every 4 s. */
+@keyframes owl-blink {
+  0%,
+  90%,
+  100% {
+    transform: scaleY(1);
+  }
+  94% {
+    transform: scaleY(0.08);
+  }
+}
+
+.owl-eye {
+  transform-box: fill-box; /* scale around the eye itself, not the whole drawing */
+  transform-origin: center;
+  animation: owl-blink 4s ease-in-out infinite;
+}
+
+/* Reduced motion stops the heartbeat line. The blink stays on purpose: it is small and short. */
 @media (prefers-reduced-motion: reduce) {
   .pulse-line {
     animation: none;
+  }
+/* The pupils glide to where the owl looks (sign-in page). */
+  .owl-pupil {
+    transition: transform 160ms ease-out;
   }
 }

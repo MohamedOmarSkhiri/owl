@@ -9,6 +9,9 @@ import '@fontsource/ibm-plex-mono/400.css'
 import './index.css'
 import App from './App'
 import { ApiError } from './api'
+import { getTheme, setTheme } from './theme'
+
+setTheme(getTheme()) // apply the saved theme before the first paint
 
 const queryClient = new QueryClient({
   queryCache: new QueryCache({

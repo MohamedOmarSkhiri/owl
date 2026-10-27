@@ -24,6 +24,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
@@ -57,17 +58,19 @@ type Count struct {
 }
 
 type PodCount struct {
-	Total   int `json:"total"`
-	Running int `json:"running"`
-	Failing int `json:"failing"`
+	Total     int `json:"total"`
+	Running   int `json:"running"`
+	Completed int `json:"completed"` // finished Jobs and one-off pods: not running, not failing
+	Failing   int `json:"failing"`
 }
 
 type Snapshot struct {
-	Cluster    string    `json:"cluster"`
-	Ts         time.Time `json:"ts"`
-	K8sVersion string    `json:"k8sVersion"`
-	Nodes      Count     `json:"nodes"`
-	Pods       PodCount  `json:"pods"`
+	Cluster    string       `json:"cluster"`
+	Ts         time.Time    `json:"ts"`
+	K8sVersion string       `json:"k8sVersion"`
+	Nodes      Count        `json:"nodes"`
+	Pods       PodCount     `json:"pods"`
+	Usage      *UsageTotals `json:"usage,omitempty"` // nil when metrics-server is missing
 }
 
 type relayClient struct {
@@ -368,8 +371,17 @@ func main() {
 
 	podLister := podInf.Lister()
 	nodeLister := nodeInf.Lister()
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		log.Fatalf("dynamic client: %v", err)
+	}
+	// Reads cluster CPU and memory for each snapshot; the relay keeps them as history.
+	meter := &requestHandler{cs: client, dyn: dyn, pods: podLister, nodes: nodeLister}
 	sendSnapshot := func() {
 		snap := buildSnapshot(*clusterName, ver.GitVersion, nodeLister, podLister, tr)
+		uctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		snap.Usage = meter.totals(uctx)
+		cancel()
 		if err := relay.post("/v1/agent/snapshot", snap); err != nil {
 			log.Printf("send snapshot failed: %v", err)
 		}
@@ -414,8 +426,11 @@ func buildSnapshot(cluster, version string, nodes listerscorev1.NodeLister, pods
 	if ps, err := pods.List(labels.Everything()); err == nil {
 		s.Pods.Total = len(ps)
 		for _, p := range ps {
-			if p.Status.Phase == corev1.PodRunning || p.Status.Phase == corev1.PodSucceeded {
+			switch p.Status.Phase {
+			case corev1.PodRunning:
 				s.Pods.Running++
+			case corev1.PodSucceeded:
+				s.Pods.Completed++
 			}
 		}
 	}

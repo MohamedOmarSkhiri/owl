@@ -113,6 +113,14 @@ jobs:
           curl -sf -H "Authorization: Bearer $TOKEN" \
             'http://localhost:2300/v1/clusters/local/usage?scope=nodes' | grep -q cpuAllocatable
           echo "agent reports, relay proxies live requests, RBAC works, usage answers"
+          curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/clusters | grep '"local"'
+          curl -sf -H "Authorization: Bearer $TOKEN" \
+            'http://localhost:2300/v1/clusters/local/resources?version=v1&resource=namespaces' | grep -q kube-system
+          curl -sf -H "Authorization: Bearer $TOKEN" \
+            'http://localhost:2300/v1/clusters/local/usage?scope=nodes' | grep -q cpuAllocatable
+          curl -sf -H "Authorization: Bearer $TOKEN" \
+            'http://localhost:2300/v1/clusters/local/history?minutes=5' | grep -q '"running"'
+          echo "agent reports, relay proxies live requests, RBAC works, usage and history answer"
       - name: Logs on failure
         if: failure()
         run: |

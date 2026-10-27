@@ -13,6 +13,10 @@ export interface Cluster {
   podsRunning: number
   podsFailing: number
   lastSeen: string
+  // From relay 0.6.0 (missing on older relays, hence optional):
+  podsCompleted?: number // finished Jobs: neither running nor failing
+  problemsOpen?: number
+  usage?: UsageTotals // whole-cluster CPU and memory; missing without metrics-server
 }
 
 export interface Problem {
@@ -44,6 +48,7 @@ export interface ResourceItem {
   status?: string
   healthy: boolean
   containers?: string[]
+  lastRestart?: string // pods: when a container last restarted (absent = never)
 }
 
 export const PODS: ResourceKind = { group: '', version: 'v1', resource: 'pods', kind: 'Pod', namespaced: true }
@@ -131,10 +136,14 @@ export const api = {
       tail: String(tail),
       since,
     }),
-  /** Validates a token without storing it. */
-    /** CPU and memory: per node (scope "nodes") or per pod (scope "pods", optionally one namespace). */
+  /** CPU and memory: per node (scope "nodes") or per pod (scope "pods", optionally one namespace). */
   usage: (id: string, scope: 'nodes' | 'pods', namespace?: string) =>
     get<UsageReport>(`/v1/clusters/${c(id)}/usage`, { scope, namespace }),
+  /** CPU, memory, pods and problems over the last `minutes` (kept by the relay, at most 6 h). */
+  history: (id: string, minutes: number) =>
+    get<HistoryPoint[]>(`/v1/clusters/${c(id)}/history`, { minutes: String(minutes) }),
+  /** Relay version, for the footer. */
+  info: () => get<{ version: string }>('/v1/info'),
   /** Validates a token without storing it. */
   check: async (token: string) => {
     const res = await fetch('/v1/clusters', { headers: { Authorization: `Bearer ${token}` } })
@@ -218,4 +227,26 @@ export function fmtMem(bytes: number): string {
     i++
   }
   return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`
+}
+
+// ---------- History (kept in memory by the relay, one point per agent snapshot) ----------
+
+export interface UsageTotals {
+  cpuUsage: number // millicores
+  cpuAllocatable: number
+  memUsage: number // bytes
+  memAllocatable: number
+}
+
+export interface HistoryPoint {
+  ts: string
+  usage?: UsageTotals // missing: no metrics at that moment (gap in the chart)
+  running: number
+  failing: number
+  problems: number
+}
+
+/** Share of capacity in use, 0–100, or null when unknown. */
+export function percent(used?: number, total?: number): number | null {
+  return used === undefined || !total ? null : Math.round((used / total) * 100)
 }
