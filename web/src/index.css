@@ -115,8 +115,9 @@ body {
   .pulse-line {
     animation: none;
   }
+}
+
 /* The pupils glide to where the owl looks (sign-in page). */
-  .owl-pupil {
-    transition: transform 160ms ease-out;
-  }
+.owl-pupil {
+  transition: transform 160ms ease-out;
 }

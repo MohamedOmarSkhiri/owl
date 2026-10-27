@@ -65,14 +65,14 @@ type Store struct {
 	mu        sync.RWMutex
 	snapshots map[string]Snapshot
 	problems  map[string]map[string]Problem // cluster -> problem key -> problem
-	history   map[string][]HistoryPoint     // cluster -> last 6 hours, oldest first (history.go)
+	history   map[string]*clusterHistory    // cluster -> charts history, 60 days (history.go)
 }
 
 func NewStore() *Store {
 	return &Store{
 		snapshots: map[string]Snapshot{},
 		problems:  map[string]map[string]Problem{},
-		history:   map[string][]HistoryPoint{},
+		history:   map[string]*clusterHistory{},
 	}
 }
 

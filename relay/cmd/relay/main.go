@@ -63,8 +63,9 @@ func decode(r *http.Request, v any) error {
 }
 
 type server struct {
-	store  *Store
-	broker *Broker
+	store   *Store
+	broker  *Broker
+	dataDir string // where the history is saved; empty = memory only
 }
 
 // --- agent API ---
@@ -246,6 +247,7 @@ func main() {
 	tlsKey := flag.String("tls-key", env("RELAY_TLS_KEY", "/tls/tls.key"), "TLS private key (PEM)")
 	seed := flag.Bool("seed", false, "load demo clusters and problems")
 	webDir := flag.String("web-dir", env("RELAY_WEB_DIR", ""), "serve the Owl web app from this folder (empty = API only)")
+	dataDir := flag.String("data-dir", env("RELAY_DATA_DIR", ""), "save the history here so it survives restarts (empty = memory only)")
 	flag.Parse()
 
 	log.Printf("owl relay %s", version)
@@ -256,7 +258,26 @@ func main() {
 		log.Fatal("set RELAY_AGENT_TOKEN and RELAY_APP_TOKEN (e.g. export RELAY_APP_TOKEN=$(openssl rand -hex 16))")
 	}
 
-	s := &server{store: NewStore(), broker: NewBroker()}
+	s := &server{store: NewStore(), broker: NewBroker(), dataDir: *dataDir}
+	if s.dataDir != "" {
+		if err := CheckWritable(s.dataDir); err != nil {
+			log.Fatalf("history: %v", err)
+		}
+		n, err := s.store.LoadHistory(s.dataDir)
+		if err != nil {
+			log.Fatalf("history: %v (move the file away to start with an empty history)", err)
+		}
+		log.Printf("history: %d clusters loaded from %s, saved every minute", n, s.dataDir)
+		go func() {
+			for range time.Tick(time.Minute) {
+				if err := s.store.SaveHistory(s.dataDir); err != nil {
+					log.Printf("history: save failed: %v", err)
+				}
+			}
+		}()
+	} else {
+		log.Print("history: memory only (set RELAY_DATA_DIR to keep it across restarts)")
+	}
 	if *seed {
 		seedDemo(s.store)
 		seedHistory(s.store, "homelab-k3s")
@@ -275,7 +296,7 @@ func main() {
 	mux.HandleFunc("GET /v1/clusters", requireToken(appToken, s.getClusters))
 	mux.HandleFunc("GET /v1/clusters/{id}/problems", requireToken(appToken, s.getProblems))
 	mux.HandleFunc("GET /v1/clusters/{id}/history", requireToken(appToken, s.getHistory))
-	mux.HandleFunc("GET /v1/info", requireToken(appToken, getInfo))
+	mux.HandleFunc("GET /v1/info", requireToken(appToken, s.getInfo))
 	// Live data, answered by the cluster's agent:
 	mux.HandleFunc("GET /v1/clusters/{id}/kinds", requireToken(appToken, s.proxy("kinds", nil)))
 	mux.HandleFunc("GET /v1/clusters/{id}/resources", requireToken(appToken,
@@ -331,6 +352,11 @@ func main() {
 	defer cancel()
 	for _, srv := range servers {
 		_ = srv.Shutdown(shutdown)
+	}
+	if s.dataDir != "" { // last save, so an upgrade loses at most nothing
+		if err := s.store.SaveHistory(s.dataDir); err != nil {
+			log.Printf("history: final save failed: %v", err)
+		}
 	}
 	log.Print("relay stopped")
 }

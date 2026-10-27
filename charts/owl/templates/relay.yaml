@@ -7,7 +7,7 @@ metadata:
     app.kubernetes.io/component: relay
 spec:
   replicas: 1                # the relay keeps state in memory: exactly one replica
-  strategy: {type: Recreate}
+  strategy: {type: Recreate} # the old pod stops (and saves its history) before the new one mounts the volume
   selector:
     matchLabels:
       app.kubernetes.io/instance: {{ .Release.Name }}
@@ -34,6 +34,7 @@ spec:
             {{- end }}
           env:
             - {name: RELAY_LISTEN, value: ":2300"}
+            - {name: RELAY_DATA_DIR, value: /data}   # history file, see relay.persistence
             {{- if .Values.tls.enabled }}
             - {name: RELAY_TLS_LISTEN, value: ":8443"}
             - {name: RELAY_TLS_CERT, value: /tls/tls.crt}
@@ -51,16 +52,24 @@ spec:
             periodSeconds: 20
           resources: {{- toYaml .Values.relay.resources | nindent 12 }}
           securityContext: {{- include "owl.containerSecurity" . | nindent 12 }}
-          {{- if .Values.tls.enabled }}
           volumeMounts:
+            - {name: data, mountPath: /data}   # the only writable path: the root filesystem is read-only
+            {{- if .Values.tls.enabled }}
             - {name: tls, mountPath: /tls, readOnly: true}
-          {{- end }}
-      {{- if .Values.tls.enabled }}
+            {{- end }}
       volumes:
+        - name: data
+          {{- if .Values.relay.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.relay.persistence.existingClaim | default (printf "%s-data" $relay) }}
+          {{- else }}
+          emptyDir: {sizeLimit: 100Mi}
+          {{- end }}
+        {{- if .Values.tls.enabled }}
         - name: tls
           secret:
             secretName: {{ include "owl.tls.name" . }}
-      {{- end }}
+        {{- end }}
       {{- with .Values.relay.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

@@ -4,6 +4,17 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-27
+
+### Added
+
+- History is kept for 60 days and survives relay restarts and upgrades: every 15 s for 6 hours, then 5-minute averages for 7 days and hourly averages for 60 days, each with its peak. The relay saves it to a volume (`relay.persistence`, 100 Mi by default): from the default StorageClass, a named one, a PersistentVolume you created, or one the chart creates on a node folder or NFS share.
+- Overview: 24 h, 7 d and 60 d ranges; hovering the chart shows the peak of each period.
+
+### Fixed
+
+- Sign-in page: the owl's eyes move smoothly again (the transition was only applied with reduced motion).
+
 ## [0.6.0] - 2026-10-27
 
 ### Added
@@ -31,6 +42,7 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 - Usage tab: live CPU and memory per node, workload and pod against capacity, requests and limits (from metrics-server), and cluster CPU and memory in the header.
 - Live pod logs: new lines appear every second, with Live/Paused to stop following and read.
+
 ## [0.3.0] - 2026-10-26
 
 First public release.

@@ -139,11 +139,11 @@ export const api = {
   /** CPU and memory: per node (scope "nodes") or per pod (scope "pods", optionally one namespace). */
   usage: (id: string, scope: 'nodes' | 'pods', namespace?: string) =>
     get<UsageReport>(`/v1/clusters/${c(id)}/usage`, { scope, namespace }),
-  /** CPU, memory, pods and problems over the last `minutes` (kept by the relay, at most 6 h). */
+  /** CPU, memory, pods and problems over the last `minutes` (kept by the relay, at most 60 days). */
   history: (id: string, minutes: number) =>
     get<HistoryPoint[]>(`/v1/clusters/${c(id)}/history`, { minutes: String(minutes) }),
   /** Relay version, for the footer. */
-  info: () => get<{ version: string }>('/v1/info'),
+  info: () => get<{ version: string; persistent?: boolean }>('/v1/info'),
   /** Validates a token without storing it. */
   check: async (token: string) => {
     const res = await fetch('/v1/clusters', { headers: { Authorization: `Bearer ${token}` } })
@@ -229,7 +229,7 @@ export function fmtMem(bytes: number): string {
   return `${v >= 100 || i === 0 ? v.toFixed(0) : v.toFixed(1)} ${units[i]}`
 }
 
-// ---------- History (kept in memory by the relay, one point per agent snapshot) ----------
+// ---------- History (kept by the relay, one point per agent snapshot, rolled up with age) ----------
 
 export interface UsageTotals {
   cpuUsage: number // millicores
@@ -240,7 +240,8 @@ export interface UsageTotals {
 
 export interface HistoryPoint {
   ts: string
-  usage?: UsageTotals // missing: no metrics at that moment (gap in the chart)
+  usage?: UsageTotals // average over the point's period; missing = no metrics then (gap in the chart)
+  peak?: UsageTotals // highest value in the period (5-minute and hourly points only)
   running: number
   failing: number
   problems: number
