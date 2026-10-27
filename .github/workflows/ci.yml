@@ -70,6 +70,15 @@ jobs:
             --set tls.mode=certManager --set 'tls.hosts={owl.example.com}' \
             --set 'clusters[0].name=local' --set 'clusters[1].name=prod' \
             --set 'clusters[1].kubeconfig=apiVersion: v1' > /dev/null
+          helm template owl charts/owl -n owl --set relay.persistence.enabled=false > /dev/null
+          helm template owl charts/owl -n owl --set relay.persistence.volumeName=my-pv > /dev/null
+          helm template owl charts/owl -n owl --set relay.persistence.pv.enabled=true \
+            --set relay.persistence.pv.hostPath=/var/lib/owl --set relay.persistence.pv.node=node-1 > /dev/null
+          helm template owl charts/owl -n owl --set relay.persistence.pv.enabled=true \
+            --set relay.persistence.pv.nfs.server=10.0.0.1 --set relay.persistence.pv.nfs.path=/exports/owl > /dev/null
+          if helm template owl charts/owl -n owl --set relay.persistence.pv.enabled=true > /dev/null 2>&1; then
+            echo "::error::pv.enabled without a path must fail"; exit 1
+          fi
 
   e2e:
     name: install on kind
@@ -91,7 +100,7 @@ jobs:
           helm install owl charts/owl -n owl --create-namespace --wait --timeout 3m \
             --set image.relay.repository=owl-relay --set image.relay.tag=ci \
             --set image.agent.repository=owl-agent --set image.agent.tag=ci
-          kubectl -n owl get pods,svc
+          kubectl -n owl get pods,svc,pvc
       - name: Check HTTP, HTTPS, sign-in and live data
         run: |
           kubectl -n owl port-forward svc/owl-relay 2300:2300 8443:443 &
@@ -111,20 +120,28 @@ jobs:
           curl -sf -H "Authorization: Bearer $TOKEN" \
             'http://localhost:2300/v1/clusters/local/usage?scope=nodes' | grep -q cpuAllocatable
           curl -sf -H "Authorization: Bearer $TOKEN" \
-            'http://localhost:2300/v1/clusters/local/usage?scope=nodes' | grep -q cpuAllocatable
-          echo "agent reports, relay proxies live requests, RBAC works, usage answers"
-          curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/clusters | grep '"local"'
-          curl -sf -H "Authorization: Bearer $TOKEN" \
-            'http://localhost:2300/v1/clusters/local/resources?version=v1&resource=namespaces' | grep -q kube-system
-          curl -sf -H "Authorization: Bearer $TOKEN" \
-            'http://localhost:2300/v1/clusters/local/usage?scope=nodes' | grep -q cpuAllocatable
-          curl -sf -H "Authorization: Bearer $TOKEN" \
             'http://localhost:2300/v1/clusters/local/history?minutes=5' | grep -q '"running"'
+          curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/info | grep -q '"persistent":true'
           echo "agent reports, relay proxies live requests, RBAC works, usage and history answer"
+      - name: History survives a relay restart
+        run: |
+          TOKEN=$(kubectl -n owl get secret owl-tokens -o jsonpath='{.data.app-token}' | base64 -d)
+          points() { curl -sf -H "Authorization: Bearer $TOKEN" 'http://localhost:2310/v1/clusters/local/history?minutes=60' | jq length; }
+          kubectl -n owl port-forward svc/owl-relay 2310:2300 & PF=$!
+          sleep 3
+          for i in $(seq 1 30); do [ "$(points)" -ge 4 ] && break; sleep 5; done   # one point per 15 s
+          before=$(points); echo "points before restart: $before"
+          kill $PF
+          kubectl -n owl rollout restart deploy/owl-relay              # old pod saves on SIGTERM
+          kubectl -n owl rollout status deploy/owl-relay --timeout 2m  # new pod loads the file
+          kubectl -n owl port-forward svc/owl-relay 2310:2300 &
+          sleep 3
+          after=$(points); echo "points after restart: $after"
+          test "$after" -ge "$before"                                  # without the volume it would start at 0
       - name: Logs on failure
         if: failure()
         run: |
-          kubectl -n owl get pods,svc,secrets -o wide || true
+          kubectl -n owl get pods,svc,secrets,pvc -o wide || true
           kubectl -n owl describe pods || true
           kubectl -n owl get events --sort-by=.lastTimestamp || true
           kubectl -n owl logs -l app.kubernetes.io/instance=owl --all-containers --prefix --tail=100 || true

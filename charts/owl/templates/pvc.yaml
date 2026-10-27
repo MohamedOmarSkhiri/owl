@@ -1,0 +1,67 @@
+{{- /*
+Volume for the relay's history file (see relay.persistence in values.yaml).
+  pv.enabled     the chart also creates the PersistentVolume, reserved for this claim
+  volumeName     the claim binds to a PersistentVolume you created
+  storageClass   that StorageClass creates the volume; empty = the cluster's default
+No claim at all when you bring your own (existingClaim).
+*/ -}}
+{{- with .Values.relay.persistence }}
+{{- if and .enabled (not .existingClaim) }}
+{{- $claim := printf "%s-data" (include "owl.relay.name" $) }}
+{{- $pvName := printf "%s-%s-data" $.Release.Namespace (include "owl.relay.name" $) }}
+{{- if .pv.enabled }}
+{{- if not (or .pv.hostPath (and .pv.nfs.server .pv.nfs.path)) }}
+{{- fail "relay.persistence.pv.enabled needs pv.hostPath, or pv.nfs.server and pv.nfs.path" }}
+{{- end }}
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: {{ $pvName }}            # PersistentVolumes are cluster-wide: the namespace keeps the name unique
+  labels: {{- include "owl.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: relay
+spec:
+  capacity:
+    storage: {{ .size }}
+  accessModes: [ReadWriteOnce]
+  persistentVolumeReclaimPolicy: {{ .pv.reclaimPolicy }}
+  storageClassName: ""           # static volume: no StorageClass involved
+  claimRef:                      # reserved for Owl's claim, no other claim can take it
+    namespace: {{ $.Release.Namespace }}
+    name: {{ $claim }}
+  {{- if .pv.hostPath }}
+  hostPath:
+    path: {{ .pv.hostPath }}
+    type: Directory              # must exist already, owned by 65532:65532 (see the chart README)
+  {{- with .pv.node }}
+  nodeAffinity:                  # the folder is on this node: the relay is scheduled there
+    required:
+      nodeSelectorTerms:
+        - matchExpressions:
+            - {key: kubernetes.io/hostname, operator: In, values: [{{ . | quote }}]}
+  {{- end }}
+  {{- else }}
+  nfs:
+    server: {{ .pv.nfs.server }}
+    path: {{ .pv.nfs.path }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $claim }}
+  labels: {{- include "owl.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: relay
+spec:
+  accessModes: [ReadWriteOnce]   # one relay pod at a time, see strategy: Recreate
+  {{- if or .pv.enabled .volumeName }}
+  storageClassName: ""           # bind to the PersistentVolume below, never ask a StorageClass
+  volumeName: {{ .volumeName | default $pvName }}
+  {{- else if .storageClass }}
+  storageClassName: {{ .storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .size }}
+{{- end }}
+{{- end }}

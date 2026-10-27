@@ -36,6 +36,8 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 runAsNonRoot: true
 runAsUser: 65532      # distroless "nonroot"; must be numeric for the kubelet to verify runAsNonRoot
 runAsGroup: 65532
+fsGroup: 65532        # volumes (the relay's history) are writable by that user
+fsGroupChangePolicy: OnRootMismatch
 seccompProfile:
   type: RuntimeDefault
 {{- end -}}

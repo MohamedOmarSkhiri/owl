@@ -6,6 +6,7 @@ export interface Series {
   name: string
   color: string // a CSS colour, e.g. 'var(--color-series-1)'
   values: (number | null)[] // one per time; null = no data (drawn as a gap)
+  peaks?: (number | null)[] // optional: highest value in each point's period, shown on hover
 }
 
 /** Width of an element, kept up to date when the window or the layout changes. */
@@ -37,6 +38,8 @@ function linePath(values: (number | null)[], x: (i: number) => number, y: (v: nu
 }
 
 const hhmm = (t: number) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+const day = (t: number) => new Date(t).toLocaleDateString([], { day: 'numeric', month: 'short' })
+const dayTime = (t: number) => `${day(t)} ${hhmm(t)}`
 
 /**
  * Percent line chart (0–100 %). One y axis only. A legend names the series, each line also
@@ -77,6 +80,10 @@ export function LineChart({ times, series, label }: { times: number[]; series: S
   }
 
   const ticks = n > 1 ? [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * (n - 1))) : []
+  // Axis labels: times for a day or less, dates beyond. The hover readout always says enough.
+  const long = n > 1 && times[n - 1] - times[0] > 36 * 3600_000
+  const tick = long ? day : hhmm
+  const when = n > 1 && times[n - 1] - times[0] > 20 * 3600_000 ? dayTime : hhmm
 
   return (
     <div>
@@ -113,7 +120,7 @@ export function LineChart({ times, series, label }: { times: number[]; series: S
             ))}
             {ticks.map((i) => (
               <text key={i} x={x(i)} y={H - 6} textAnchor="middle" className="fill-muted text-[11px] tabular-nums">
-                {hhmm(times[i])}
+                {tick(times[i])}
               </text>
             ))}
             {series.map((s) => (
@@ -159,12 +166,15 @@ export function LineChart({ times, series, label }: { times: number[]; series: S
             style={x(hover) > width / 2 ? { right: width - x(hover) + 12 } : { left: x(hover) + 12 }}
             role="status"
           >
-            <div className="mb-1 text-muted tabular-nums">{hhmm(times[hover])}</div>
+            <div className="mb-1 text-muted tabular-nums">{when(times[hover])}</div>
             {series.map((s) => (
               <div key={s.name} className="flex items-center gap-2">
                 <span className="inline-block h-0.5 w-3 rounded" style={{ background: s.color }} aria-hidden />
                 <span className="font-semibold tabular-nums">{s.values[hover] === null ? '—' : `${s.values[hover]}%`}</span>
                 <span className="text-muted">{s.name}</span>
+                {s.peaks?.[hover] != null && (
+                  <span className="ml-auto pl-3 text-muted tabular-nums">peak {s.peaks[hover]}%</span>
+                )}
               </div>
             ))}
           </div>

@@ -4,8 +4,8 @@ description: Watch your Kubernetes clusters from the browser. Web app, relay and
 type: application
 # Release process: bump version AND appVersion to the new release, add a CHANGELOG entry,
 # then push the tag v<version>. The release workflow refuses a tag that does not match.
-version: 0.6.0
-appVersion: "0.6.0"
+version: 0.7.0
+appVersion: "0.7.0"
 home: https://github.com/MohamedOmarSkhiri/owl
 sources:
   - https://github.com/MohamedOmarSkhiri/owl
@@ -14,4 +14,3 @@ keywords: [kubernetes, k3s, monitoring, dashboard, observability]
 maintainers:
   - name: Mohamed Omar Skhiri
     url: https://www.linkedin.com/in/mohamed-omar-skhiri
-

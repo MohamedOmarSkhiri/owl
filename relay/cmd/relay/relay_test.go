@@ -189,21 +189,70 @@ func waitFor(t *testing.T, ok func() bool) {
 	t.Fatal("condition not met")
 }
 
-func TestHistoryKeepsSixHoursAndFilters(t *testing.T) {
-	st := NewStore()
-	now := time.Now().UTC()
-	for i := historyMax + 10; i > 0; i-- { // 10 more than fit
+// feed records a snapshot every 15 s from start for d, with the CPU usage given by cpu(t).
+func feed(st *Store, cluster string, start time.Time, d time.Duration, cpu func(t time.Time) int64) {
+	for t := start; t.Before(start.Add(d)); t = t.Add(15 * time.Second) {
 		var snap Snapshot
-		snap.Cluster, snap.Ts = "c", now.Add(-time.Duration(i)*15*time.Second)
-		snap.Usage = &UsageTotals{CPUUsage: int64(i)}
+		snap.Cluster, snap.Ts = cluster, t
+		snap.Usage = &UsageTotals{CPUUsage: cpu(t), CPUAllocatable: 4000, MemUsage: 1, MemAllocatable: 2}
 		st.PutSnapshot(snap)
 	}
-	if n := len(st.history["c"]); n != historyMax {
-		t.Fatalf("kept %d points, want %d", n, historyMax)
+}
+
+func TestHistoryRollsUpWithAverageAndPeak(t *testing.T) {
+	st := NewStore()
+	start := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Hour)
+	spike := start.Add(10 * time.Minute)
+	feed(st, "c", start, 2*time.Hour, func(t time.Time) int64 {
+		if t.Equal(spike) {
+			return 4000 // one 15-second spike
+		}
+		return 1000
+	})
+	h := st.history["c"]
+	if n := len(h.Tiers[1]); n != 23 { // 24 periods of 5 min, the last one still open
+		t.Fatalf("5-minute points = %d, want 23", n)
 	}
-	last := st.History("c", time.Minute)
-	if len(last) != 3 || last[2].Usage.CPUUsage != 1 { // -45 s, -30 s, -15 s; newest last
-		t.Fatalf("last minute = %+v", last)
+	p := h.Tiers[1][2] // 10:00-10:05 after the hour: holds the spike
+	if p.Peak.CPUUsage != 4000 || p.Usage.CPUUsage != (19*1000+4000)/20 {
+		t.Fatalf("5-minute point = avg %d peak %d", p.Usage.CPUUsage, p.Peak.CPUUsage)
+	}
+	if len(h.Tiers[2]) != 1 || h.Tiers[2][0].Peak.CPUUsage != 4000 { // first hour closed, peak kept
+		t.Fatalf("hourly points = %+v", h.Tiers[2])
+	}
+}
+
+func TestHistoryPicksTheLayerAndPrunes(t *testing.T) {
+	st := NewStore()
+	feed(st, "c", time.Now().UTC().Add(-8*time.Hour), 8*time.Hour, func(time.Time) int64 { return 1 })
+	if got := len(st.History("c", time.Hour)); got < 239 || got > 241 { // raw 15 s points
+		t.Fatalf("1 h = %d points, want ~240", got)
+	}
+	if got := len(st.History("c", 24*time.Hour)); got < 96 || got > 98 { // 8 h of 5-minute points
+		t.Fatalf("24 h = %d points, want ~97", got)
+	}
+	oldest := st.history["c"].Tiers[0][0].Ts
+	if age := time.Since(oldest); age > 6*time.Hour+time.Minute {
+		t.Fatalf("raw layer keeps %v, want 6 h", age)
+	}
+}
+
+func TestHistorySurvivesSaveAndLoad(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore()
+	feed(st, "c", time.Now().UTC().Add(-30*time.Minute), 30*time.Minute, func(time.Time) int64 { return 7 })
+	if err := st.SaveHistory(dir); err != nil {
+		t.Fatal(err)
+	}
+	fresh := NewStore() // a restarted relay
+	if n, err := fresh.LoadHistory(dir); err != nil || n != 1 {
+		t.Fatalf("load: %d clusters, %v", n, err)
+	}
+	if a, b := len(st.History("c", time.Hour)), len(fresh.History("c", time.Hour)); a != b || a < 100 {
+		t.Fatalf("points before %d, after %d", a, b)
+	}
+	if n, err := NewStore().LoadHistory(t.TempDir()); err != nil || n != 0 { // first start: no file yet
+		t.Fatalf("empty dir: %d, %v", n, err)
 	}
 }
 
@@ -223,5 +272,21 @@ func TestHistoryEndpoint(t *testing.T) {
 	}
 	if r := do(t, "GET", hs.URL+"/v1/clusters/nope/history", appTok, ""); r.StatusCode != 404 {
 		t.Fatalf("unknown cluster: %d", r.StatusCode)
+	}
+}
+
+func TestCheckWritable(t *testing.T) {
+	if err := CheckWritable(t.TempDir()); err != nil {
+		t.Fatalf("writable dir: %v", err)
+	}
+	ro := t.TempDir()
+	if err := os.Chmod(ro, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root can write anywhere")
+	}
+	if err := CheckWritable(ro); err == nil || !strings.Contains(err.Error(), "65532") {
+		t.Fatalf("read-only dir: %v", err)
 	}
 }

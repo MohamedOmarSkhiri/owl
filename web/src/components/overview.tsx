@@ -1,5 +1,5 @@
 // Overview: the 10-second answer to "is this cluster OK, and what changed?".
-// History comes from the relay (last 6 h in memory); the rest reuses the other tabs' queries.
+// History comes from the relay (60 days, saved on its volume); the rest reuses the other tabs' queries.
 import { useMemo, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router'
@@ -9,9 +9,13 @@ import { PodPanel } from './panels'
 import { ErrorNote, Loading } from './ui'
 
 const REFRESH = 15_000 // agents report every 15 s
+// The relay keeps 15 s points for 6 h, 5-minute points for 7 days and hourly points for 60 days.
 const RANGES = [
-  { minutes: 60, label: '1 h' },
-  { minutes: 360, label: '6 h' },
+  { minutes: 60, label: '1 h', title: 'last hour' },
+  { minutes: 360, label: '6 h', title: 'last 6 hours' },
+  { minutes: 1440, label: '24 h', title: 'last 24 hours, 5-minute averages' },
+  { minutes: 10080, label: '7 d', title: 'last 7 days, 5-minute averages' },
+  { minutes: 86400, label: '60 d', title: 'last 60 days, hourly averages' },
 ]
 const CPU = 'var(--color-series-1)'
 const MEM = 'var(--color-series-2)'
@@ -43,6 +47,8 @@ export function OverviewTab({ cluster }: { cluster: Cluster }) {
 
   // Same query keys as the Usage, Pods and Problems tabs: switching tabs reuses the data.
   const history = useQuery({ queryKey: ['history', id, minutes], queryFn: () => api.history(id, minutes), refetchInterval: REFRESH })
+  const info = useQuery({ queryKey: ['info'], queryFn: api.info, staleTime: Infinity, retry: false })
+  const range = RANGES.find((r) => r.minutes === minutes) ?? RANGES[0]
   const usage = useQuery({ queryKey: ['usage', id, 'pods', ''], queryFn: () => api.usage(id, 'pods'), refetchInterval: REFRESH })
   const pods = useQuery({ queryKey: ['list', id, 'pods', ''], queryFn: () => api.list(id, PODS), refetchInterval: REFRESH })
   const problems = useQuery({ queryKey: ['problems', id], queryFn: () => api.problems(id), refetchInterval: REFRESH })
@@ -51,6 +57,8 @@ export function OverviewTab({ cluster }: { cluster: Cluster }) {
   const times = pts.map((p) => new Date(p.ts).getTime())
   const cpuLine = pts.map((p) => percent(p.usage?.cpuUsage, p.usage?.cpuAllocatable))
   const memLine = pts.map((p) => percent(p.usage?.memUsage, p.usage?.memAllocatable))
+  const cpuPeak = pts.map((p) => percent(p.peak?.cpuUsage, p.peak?.cpuAllocatable))
+  const memPeak = pts.map((p) => percent(p.peak?.memUsage, p.peak?.memAllocatable))
   const hasMetrics = cpuLine.some((v) => v !== null) || !!cluster.usage
 
   const u = cluster.usage
@@ -125,7 +133,7 @@ export function OverviewTab({ cluster }: { cluster: Cluster }) {
         />
       </div>
 
-      <Card title={`CPU and memory, % of capacity, last ${minutes === 60 ? 'hour' : '6 hours'}`}>
+      <Card title={`CPU and memory, % of capacity, ${range.title}`}>
         <div className="mt-3">
           {history.isPending ? (
             <Loading />
@@ -141,14 +149,18 @@ export function OverviewTab({ cluster }: { cluster: Cluster }) {
             <LineChart
               times={times}
               series={[
-                { name: 'CPU', color: CPU, values: cpuLine },
-                { name: 'Memory', color: MEM, values: memLine },
+                { name: 'CPU', color: CPU, values: cpuLine, peaks: cpuPeak },
+                { name: 'Memory', color: MEM, values: memLine, peaks: memPeak },
               ]}
-              label={`CPU and memory use over the last ${minutes} minutes`}
+              label={`CPU and memory use, ${range.title}`}
             />
           )}
         </div>
-        <p className="mt-2 text-xs text-muted">History is kept by the relay in memory for 6 hours and restarts with it.</p>
+        <p className="mt-2 text-xs text-muted">
+          {info.data?.persistent === false
+            ? 'History is kept in memory and restarts with the relay. Enable relay.persistence in the chart to keep it.'
+            : 'History is kept for 60 days: every 15 s for 6 hours, then 5-minute and hourly averages with their peaks.'}
+        </p>
       </Card>
 
       <div className="grid gap-4 lg:grid-cols-2">

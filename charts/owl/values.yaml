@@ -87,6 +87,29 @@ rbac:
     - argoproj.io
 
 relay:
+  # History of the Overview charts (60 days), saved on a volume so restarts and upgrades keep it.
+  # disabled: kept in an emptyDir, which survives container restarts but not a new pod.
+  #
+  # Where the volume comes from, first match wins:
+  #   existingClaim   your own PersistentVolumeClaim, used as is
+  #   pv.enabled      the chart creates a PersistentVolume (node folder or NFS) and binds to it
+  #   volumeName      bind to a PersistentVolume you created yourself
+  #   storageClass    that StorageClass creates the volume
+  #   (all empty)     the cluster's default StorageClass creates it (local-path on K3s)
+  persistence:
+    enabled: true
+    size: 100Mi          # about 1.2 MB per watched cluster
+    storageClass: ""
+    volumeName: ""
+    existingClaim: ""
+    pv:
+      enabled: false
+      reclaimPolicy: Retain   # keep the data when the claim is deleted
+      hostPath: ""            # a folder on the node, e.g. /var/lib/owl (must be owned by 65532:65532)
+      node: ""                # hostPath on a multi-node cluster: the node that has the folder
+      nfs:
+        server: ""            # e.g. 192.168.1.10
+        path: ""              # e.g. /exports/owl (writable by uid 65532)
   resources:
     requests: {cpu: 20m, memory: 32Mi}
     limits: {memory: 128Mi}

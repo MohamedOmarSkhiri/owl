@@ -34,6 +34,31 @@ helm upgrade --install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --r
   --set 'clusters[1].name=prod' --set-file 'clusters[1].kubeconfig=./prod.yaml'
 ```
 
+## History storage
+
+The relay keeps 60 days of history in `/data/history.json` (about 1.2 MB per cluster). Pick where `/data` lives:
+
+| You have | Values | What happens |
+|---|---|---|
+| A default StorageClass (K3s `local-path`, cloud disks) | nothing to set | The chart's claim gets a volume automatically |
+| Another StorageClass | `relay.persistence.storageClass=longhorn` | That class creates the volume |
+| A PersistentVolume you created | `relay.persistence.volumeName=my-pv` | The claim binds to that exact volume |
+| A folder on a node, no StorageClass | `relay.persistence.pv.enabled=true`, `pv.hostPath=/var/lib/owl` | The chart creates the PersistentVolume and its claim |
+| An NFS share | `relay.persistence.pv.enabled=true`, `pv.nfs.server=…`, `pv.nfs.path=…` | Same, on NFS |
+| Your own claim | `relay.persistence.existingClaim=my-claim` | Used as is |
+| No storage at all | `relay.persistence.enabled=false` | Memory and `emptyDir`: history is lost when the pod is replaced |
+
+The relay runs as user 65532. Volumes from a StorageClass are made writable automatically (`fsGroup`); a node folder or an NFS export must be writable by that user:
+
+```bash
+# on the node (hostPath)
+sudo install -d -o 65532 -g 65532 -m 0750 /var/lib/owl
+# on the NFS server: chown the export, or squash all users to it
+sudo chown 65532:65532 /exports/owl        # or in /etc/exports: (rw,all_squash,anonuid=65532,anongid=65532)
+```
+
+If the folder is not writable, the relay stops at start with a message saying so.
+
 ## Values
 
 | Key | Default | Description |
@@ -61,11 +86,20 @@ helm upgrade --install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --r
 | `clusters` | `[{name: local}]` | See above |
 | `rbac.create` | `true` | Read-only ClusterRole for the in-cluster agent |
 | `rbac.extraApiGroups` | common CRD groups | CRD groups the agent may read |
+| `relay.persistence.enabled` | `true` | Keep the 60-day history on a volume across restarts and upgrades |
+| `relay.persistence.size` | `100Mi` | About 1.2 MB per watched cluster |
+| `relay.persistence.storageClass` | `""` | Empty: the cluster's default (local-path on K3s) |
+| `relay.persistence.volumeName` | `""` | Bind to a PersistentVolume you created (no StorageClass needed) |
+| `relay.persistence.existingClaim` | `""` | Use your own PersistentVolumeClaim |
+| `relay.persistence.pv.enabled` | `false` | The chart creates the PersistentVolume too |
+| `relay.persistence.pv.hostPath`, `.node` | `""` | A folder on a node (owned by `65532:65532`) |
+| `relay.persistence.pv.nfs.server`, `.path` | `""` | An NFS export writable by uid 65532 |
+| `relay.persistence.pv.reclaimPolicy` | `Retain` | Keep the data when the claim is deleted |
 | `relay.resources`, `.nodeSelector`, `.tolerations`, `.affinity` | | |
 | `agent.resources`, `.nodeSelector`, `.tolerations`, `.affinity` | | |
 
 ## Notes
 
-- The relay keeps state in memory and runs one replica. After a restart, agents repopulate it within a minute.
+- The relay runs one replica. After a restart, agents report clusters and problems again within a minute, and the history is read back from `/data` (see History storage).
 - The tokens Secret has `helm.sh/resource-policy: keep`, so a reinstall keeps your tokens. Delete it to rotate them.
 - The self-signed certificate is generated once. To regenerate it after changing `tls.hosts`, delete the `owl-tls` Secret and run `helm upgrade`.
