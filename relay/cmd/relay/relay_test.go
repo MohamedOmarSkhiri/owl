@@ -188,3 +188,40 @@ func waitFor(t *testing.T, ok func() bool) {
 	}
 	t.Fatal("condition not met")
 }
+
+func TestHistoryKeepsSixHoursAndFilters(t *testing.T) {
+	st := NewStore()
+	now := time.Now().UTC()
+	for i := historyMax + 10; i > 0; i-- { // 10 more than fit
+		var snap Snapshot
+		snap.Cluster, snap.Ts = "c", now.Add(-time.Duration(i)*15*time.Second)
+		snap.Usage = &UsageTotals{CPUUsage: int64(i)}
+		st.PutSnapshot(snap)
+	}
+	if n := len(st.history["c"]); n != historyMax {
+		t.Fatalf("kept %d points, want %d", n, historyMax)
+	}
+	last := st.History("c", time.Minute)
+	if len(last) != 3 || last[2].Usage.CPUUsage != 1 { // -45 s, -30 s, -15 s; newest last
+		t.Fatalf("last minute = %+v", last)
+	}
+}
+
+func TestHistoryEndpoint(t *testing.T) {
+	s, ts := newTestServer(t, "")
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/clusters/{id}/history", requireToken(appTok, s.getHistory))
+	hs := httptest.NewServer(mux)
+	defer hs.Close()
+
+	do(t, "POST", ts.URL+"/v1/agent/snapshot", agentTok,
+		`{"cluster":"dev","pods":{"total":3,"running":2,"completed":1},"usage":{"cpuUsage":500,"cpuAllocatable":4000,"memUsage":1,"memAllocatable":2}}`)
+	r := do(t, "GET", hs.URL+"/v1/clusters/dev/history?minutes=5", appTok, "")
+	var pts []HistoryPoint
+	if err := json.NewDecoder(r.Body).Decode(&pts); err != nil || len(pts) != 1 || pts[0].Usage.CPUAllocatable != 4000 {
+		t.Fatalf("history = %+v (%v)", pts, err)
+	}
+	if r := do(t, "GET", hs.URL+"/v1/clusters/nope/history", appTok, ""); r.StatusCode != 404 {
+		t.Fatalf("unknown cluster: %d", r.StatusCode)
+	}
+}

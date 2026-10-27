@@ -259,6 +259,7 @@ func main() {
 	s := &server{store: NewStore(), broker: NewBroker()}
 	if *seed {
 		seedDemo(s.store)
+		seedHistory(s.store, "homelab-k3s")
 		go demoHeartbeat(s.store, "homelab-k3s", "edge-pi")
 		log.Print("demo data loaded (homelab-k3s and edge-pi kept alive, lab-old stays down)")
 	}
@@ -273,6 +274,8 @@ func main() {
 
 	mux.HandleFunc("GET /v1/clusters", requireToken(appToken, s.getClusters))
 	mux.HandleFunc("GET /v1/clusters/{id}/problems", requireToken(appToken, s.getProblems))
+	mux.HandleFunc("GET /v1/clusters/{id}/history", requireToken(appToken, s.getHistory))
+	mux.HandleFunc("GET /v1/info", requireToken(appToken, getInfo))
 	// Live data, answered by the cluster's agent:
 	mux.HandleFunc("GET /v1/clusters/{id}/kinds", requireToken(appToken, s.proxy("kinds", nil)))
 	mux.HandleFunc("GET /v1/clusters/{id}/resources", requireToken(appToken,

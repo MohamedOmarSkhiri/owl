@@ -2,7 +2,7 @@
 // compared with node capacity, requests and limits.
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api, fmtCPU, fmtMem, type NodeUsage, type PodUsage } from '../api'
+import { api, fmtCPU, fmtMem, type PodUsage } from '../api'
 import { PodPanel } from './panels'
 import { NamespaceSelect, SearchBox } from './tabs'
 import { ErrorNote, Loading } from './ui'
@@ -46,28 +46,6 @@ function PodMeter({ used, request, limit, fmt }: { used: number; request: number
   return <Meter used={used} max={max} label={of ? `${fmt(used)} of ${fmt(max)} ${of}` : fmt(used)} />
 }
 
-/** Header numbers for the cluster page: share of all node capacity in use. Hidden without metrics. */
-export function ClusterUsageStats({ cluster }: { cluster: string }) {
-  const q = useQuery({ queryKey: ['usage', cluster, 'nodes'], queryFn: () => api.usage(cluster, 'nodes'), refetchInterval: REFRESH })
-  const nodes = q.data?.nodes ?? []
-  if (!q.data?.metrics || nodes.length === 0) return null
-  const sum = (f: (n: NodeUsage) => number) => nodes.reduce((t, n) => t + f(n), 0)
-  const cpu = Math.round((sum((n) => n.cpuUsage) / Math.max(1, sum((n) => n.cpuAllocatable))) * 100)
-  const mem = Math.round((sum((n) => n.memUsage) / Math.max(1, sum((n) => n.memAllocatable))) * 100)
-  return (
-    <>
-      <div>
-        <dt className="text-xs text-muted">CPU used</dt>
-        <dd className={`text-2xl font-semibold tabular-nums ${cpu >= 90 ? 'text-bad' : ''}`}>{cpu}%</dd>
-      </div>
-      <div>
-        <dt className="text-xs text-muted">Memory used</dt>
-        <dd className={`text-2xl font-semibold tabular-nums ${mem >= 90 ? 'text-bad' : ''}`}>{mem}%</dd>
-      </div>
-    </>
-  )
-}
-
 export function UsageTab({ cluster }: { cluster: string }) {
   const [view, setView] = useState<View>('nodes')
   const [ns, setNs] = useState('')
@@ -76,7 +54,7 @@ export function UsageTab({ cluster }: { cluster: string }) {
   const [openPod, setOpenPod] = useState<PodUsage | null>(null)
 
   const nodes = useQuery({
-    queryKey: ['usage', cluster, 'nodes'], // same key as the header: one request serves both
+    queryKey: ['usage', cluster, 'nodes'],
     queryFn: () => api.usage(cluster, 'nodes'),
     refetchInterval: REFRESH,
     enabled: view === 'nodes',

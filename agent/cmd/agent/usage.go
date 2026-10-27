@@ -289,3 +289,31 @@ func workloadOf(pod *corev1.Pod) (kind, name string) {
 func podFinished(pod *corev1.Pod) bool {
 	return pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
 }
+
+// UsageTotals is the whole cluster's CPU and memory, sent with every snapshot.
+type UsageTotals struct {
+	CPUUsage       int64 `json:"cpuUsage"` // millicores
+	CPUAllocatable int64 `json:"cpuAllocatable"`
+	MemUsage       int64 `json:"memUsage"` // bytes
+	MemAllocatable int64 `json:"memAllocatable"`
+}
+
+// totals adds up all nodes. nil when metrics-server has no data, so the relay records a gap.
+func (h *requestHandler) totals(ctx context.Context) *UsageTotals {
+	report, err := h.nodeUsage(ctx)
+	if err != nil || !report.Metrics {
+		return nil
+	}
+	return sumNodes(report.Nodes)
+}
+
+func sumNodes(nodes []NodeUsage) *UsageTotals {
+	t := &UsageTotals{}
+	for _, n := range nodes {
+		t.CPUUsage += n.CPUUsage
+		t.CPUAllocatable += n.CPUAllocatable
+		t.MemUsage += n.MemUsage
+		t.MemAllocatable += n.MemAllocatable
+	}
+	return t
+}

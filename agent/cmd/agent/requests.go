@@ -58,6 +58,8 @@ type ResourceItem struct {
 	Status     string    `json:"status,omitempty"`
 	Healthy    bool      `json:"healthy"`
 	Containers []string  `json:"containers,omitempty"`
+	// Pods only: when a container last restarted, so the app can tell an old restart from a crash now.
+	LastRestart *time.Time `json:"lastRestart,omitempty"`
 }
 
 var errSecretsBlocked = errors.New("secrets are not exposed by the KubePulse agent")
@@ -369,6 +371,7 @@ func summarize(gvr schema.GroupVersionResource, u *unstructured.Unstructured) Re
 		var pod corev1.Pod
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj, &pod); err == nil {
 			it.Status, it.Healthy = podStatus(&pod)
+			it.LastRestart = lastRestart(&pod)
 			for _, c := range pod.Spec.Containers {
 				it.Containers = append(it.Containers, c.Name)
 			}
@@ -438,6 +441,9 @@ func podStatus(pod *corev1.Pod) (string, bool) {
 			reason = t.Reason
 		}
 	}
+	if pod.Status.Phase == corev1.PodSucceeded {
+		reason = "Completed" // the word kubectl uses for a pod that finished its work
+	}
 	if pod.DeletionTimestamp != nil {
 		reason = "Terminating"
 	}
@@ -445,4 +451,21 @@ func podStatus(pod *corev1.Pod) (string, bool) {
 		healthy = false
 	}
 	return fmt.Sprintf("%s · %d/%d · %d restarts", reason, ready, len(pod.Spec.Containers), restarts), healthy
+}
+
+// lastRestart is when the most recent container restart happened: the end of the previous run
+// (lastState.terminated.finishedAt) of the container that restarted last. nil = never restarted.
+func lastRestart(pod *corev1.Pod) *time.Time {
+	var last *time.Time
+	for _, cs := range pod.Status.ContainerStatuses {
+		t := cs.LastTerminationState.Terminated
+		if cs.RestartCount == 0 || t == nil || t.FinishedAt.IsZero() {
+			continue
+		}
+		if last == nil || t.FinishedAt.After(*last) {
+			at := t.FinishedAt.UTC()
+			last = &at
+		}
+	}
+	return last
 }

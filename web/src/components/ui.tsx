@@ -2,19 +2,35 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { X } from 'lucide-react'
 import type { Health } from '../api'
 
-/** The 5a owl: blue ear tufts, amber-ringed eyes with heptagon pupils, beak. */
-export function OwlMark({ size = 32 }: { size?: number }) {
+/**
+ * The 5a owl: blue ear tufts, amber-ringed eyes with heptagon pupils, beak.
+ * blink: the eyes close and open every few seconds (sign-in page).
+ * look: where the owl looks, x and y from -1 to 1 (0, 0 = straight ahead).
+ */
+export function OwlMark({
+  size = 32,
+  blink = false,
+  look,
+}: {
+  size?: number
+  blink?: boolean
+  look?: { x: number; y: number }
+}) {
   const hept = (cx: number, cy: number, r: number) =>
     Array.from({ length: 7 }, (_, i) => {
       const a = ((-90 + (i * 360) / 7) * Math.PI) / 180
       return `${(cx + r * Math.cos(a)).toFixed(1)},${(cy + r * Math.sin(a)).toFixed(1)}`
     }).join(' ')
+  // The pupil can move 38 units before touching the white's edge (white r=112, pupil r=62).
+  const shift = look ? `translate(${(look.x * 38).toFixed(1)}px, ${(look.y * 38).toFixed(1)}px)` : undefined
   const eye = (x: number) => (
-    <g key={x}>
+    <g key={x} className={blink ? 'owl-eye' : undefined}>
       <circle cx={x} cy={500} r={136} fill="#FBBF24" />
       <circle cx={x} cy={500} r={112} fill="#FFFFFF" />
-      <polygon points={hept(x, 508, 62)} fill="#326CE5" />
-      <circle cx={x - 24} cy={476} r={16} fill="#FFFFFF" />
+      <g className="owl-pupil" style={{ transform: shift }}>
+        <polygon points={hept(x, 508, 62)} fill="#326CE5" />
+        <circle cx={x - 24} cy={476} r={16} fill="#FFFFFF" />
+      </g>
     </g>
   )
   return (
