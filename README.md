@@ -8,8 +8,11 @@
 
 Owl is a small, self-hosted dashboard for Kubernetes and K3s. Install it with Helm, open it on port 2300 (HTTP) or 443 (HTTPS), and see:
 
+- **Overview**: CPU, memory, pods and open problems at a glance, with 60 days of history (1 h to 60 d charts, averages and peaks)
 - **Problems**: CrashLoopBackOff, ImagePullBackOff, OOMKilled, failed and long-pending pods, warning events
+- **Notifications**: Telegram, Slack, Discord or any webhook when a problem opens or a cluster goes down
 - **Pods**: status, restarts (and when), age; open any pod for live logs, download them, or read its YAML
+- **Usage**: CPU and memory per node, workload and pod against requests, limits and capacity
 - **Explore**: any resource type in any namespace, CRDs included (HTTPRoute, Certificate, Application…), as YAML or JSON
 - **Many clusters in one place**: the cluster Owl runs in, plus any other cluster you give it a kubeconfig for
 
@@ -37,14 +40,14 @@ kubectl -n owl port-forward svc/owl-relay 2300:2300
 Open http://localhost:2300 and sign in with the token. To publish it on the node instead (ports 2300 and 443 must be free on the node):
 
 ```bash
-helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl -reset-then-reuse-values --set service.type=LoadBalancer
+helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reset-then-reuse-values --set service.type=LoadBalancer
 ```
 
 Watch another cluster too:
 
 ```bash
 kubectl config view --minify --flatten --context prod > prod.yaml
-helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl -reset-then-reuse-values \
+helm upgrade owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --reset-then-reuse-values \
   --set 'clusters[0].name=local' --set 'clusters[1].name=prod' --set-file 'clusters[1].kubeconfig=prod.yaml'
 ```
 

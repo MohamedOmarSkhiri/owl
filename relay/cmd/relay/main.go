@@ -301,6 +301,7 @@ func main() {
 	mux.HandleFunc("GET /v1/clusters", requireToken(appToken, s.getClusters))
 	mux.HandleFunc("GET /v1/clusters/{id}/problems", requireToken(appToken, s.getProblems))
 	mux.HandleFunc("GET /v1/clusters/{id}/history", requireToken(appToken, s.getHistory))
+	mux.HandleFunc("GET /v1/info", requireToken(appToken, s.getInfo))
 	mux.HandleFunc("GET /v1/notifications", requireToken(appToken, s.getNotifications))
 	mux.HandleFunc("POST /v1/notifications/test", requireToken(appToken, s.testNotifications))
 	// Live data, answered by the cluster's agent:
