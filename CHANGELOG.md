@@ -1,6 +1,16 @@
 # Changelog
 
 All notable changes to Owl. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses [semantic versioning](https://semver.org).
+
+## [Unreleased]
+
+## [0.8.1] - 2026-10-31
+
+### Fixed
+
+- The relay answers `/v1/info` again (lost in 0.8.0): the version in the sidebar footer, and the Overview's note on whether history survives restarts.
+- README: `--reset-then-reuse-values` typo, and the feature list now includes Overview, Notifications and Usage.
+
 ## [0.8.0] - 2026-10-27
 
 ### Added
@@ -12,8 +22,6 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 - The Overview no longer says the history is kept for 60 days when the relay has no volume (`relay.persistence.enabled=false`).
 - Upgrade commands in the docs and the app use `--reset-then-reuse-values`: with `--reuse-values`, an upgrade does not pick up settings added by the new chart version (such as `relay.persistence` in 0.7.0).
-
-## [Unreleased]
 
 ## [0.7.0] - 2026-10-27
 
