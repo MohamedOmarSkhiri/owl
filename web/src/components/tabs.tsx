@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertOctagon, AlertTriangle, BellRing, Search } from 'lucide-react'
 import { api, kindLabel, NAMESPACES, PODS, sameKind, timeAgo, type Problem, type ResourceItem, type ResourceKind } from '../api'
+import { CrashReport } from './crash'
 import { ObjectPanel, PodPanel } from './panels'
 import { ResourceTable } from './ResourceTable'
 import { ErrorNote, inputClass, Loading, Panel } from './ui'
@@ -78,7 +79,7 @@ export function ProblemsTab({ cluster }: { cluster: string }) {
         {q.data.map((p) => {
           const isPod = p.object.startsWith('pod/')
           return (
-            <li key={p.id}>
+            <li key={p.id} className="pb-0.5">
               <button
                 onClick={() => openProblem(p)}
                 disabled={!isPod}
@@ -97,7 +98,14 @@ export function ProblemsTab({ cluster }: { cluster: string }) {
                 </span>
                 <span className="shrink-0 text-sm text-muted tabular-nums">{timeAgo(p.lastSeen)} ago</span>
               </button>
+              {/* Outside the button: the report has its own controls (expand, download). */}
+              {p.crash && (
+                <div className="-mt-1 px-5 pb-3 sm:pl-13">
+                  <CrashReport crash={p.crash} pod={p.object.replace(/^pod\//, '')} />
+                </div>
+              )}
             </li>
+
           )
         })}
       </ul>

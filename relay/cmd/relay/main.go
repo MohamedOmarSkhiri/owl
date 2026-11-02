@@ -100,6 +100,7 @@ func (s *server) postProblem(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "severity must be critical or warning")
 		return
 	}
+	p.Crash.trim()
 	if s.store.UpsertProblem(p) {
 		state := "OPEN"
 		if p.Resolved {

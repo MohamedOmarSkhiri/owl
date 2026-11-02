@@ -46,9 +46,11 @@ type Problem struct {
 	FirstSeen time.Time `json:"firstSeen"`
 	LastSeen  time.Time `json:"lastSeen"`
 	Resolved  bool      `json:"resolved"`
+	Crash     *Crash    `json:"crash,omitempty"` // how the container's last run ended (crash.go)
 }
 
 func (p Problem) key() string {
+
 	return p.Source + "|" + p.Namespace + "|" + p.Object + "|" + p.Reason
 }
 
@@ -139,10 +141,14 @@ func (t *tracker) raise(p Problem) {
 	t.open[p.key()] = p
 	t.mu.Unlock()
 
-	if !exists {
+	switch {
+	case !exists:
 		log.Printf("OPEN     %-8s %s/%s %s: %s", p.Severity, p.Namespace, p.Object, p.Reason, p.Message)
 		t.send(p)
+	case crashChanged(old.Crash, p.Crash): // crashed again: the relay keeps the newest log
+		t.send(p)
 	}
+
 }
 
 // resolveWhere closes every open problem matching the filter.
@@ -219,10 +225,15 @@ func podProblems(pod *corev1.Pod) []Problem {
 	for _, cs := range statuses {
 		if w := cs.State.Waiting; w != nil && badWaiting[w.Reason] {
 			add("critical", w.Reason, fmt.Sprintf("container %s: %s", cs.Name, w.Message))
+			if w.Reason == "CrashLoopBackOff" {
+				out[len(out)-1].Crash = crashOf(cs) // the log is added by the crash recorder
+			}
 		}
 		if t := cs.LastTerminationState.Terminated; t != nil && t.Reason == "OOMKilled" && cs.RestartCount > 0 {
 			add("critical", "OOMKilled", fmt.Sprintf("container %s restarted %d times", cs.Name, cs.RestartCount))
+			out[len(out)-1].Crash = crashOf(cs)
 		}
+
 	}
 	return out
 }
@@ -295,6 +306,7 @@ func main() {
 	podInf := factory.Core().V1().Pods()
 	nodeInf := factory.Core().V1().Nodes()
 	evInf := factory.Core().V1().Events()
+	crashes := newCrashRecorder(client) // reads the log of each crashed run once (crash.go)
 
 	// evaluatePod raises the pod's current problems and resolves the ones that cleared.
 	evaluatePod := func(pod *corev1.Pod) {
@@ -302,8 +314,10 @@ func main() {
 		current := map[string]bool{}
 		for _, p := range podProblems(pod) {
 			current[p.Reason] = true
+			crashes.fill(ctx, pod.Namespace, pod.Name, p.Crash)
 			tr.raise(p)
 		}
+
 		tr.resolveWhere(func(p Problem) bool {
 			return p.Source == "pod" && p.Namespace == pod.Namespace && p.Object == obj && !current[p.Reason]
 		})
@@ -329,6 +343,8 @@ func main() {
 				tr.resolveWhere(func(p Problem) bool {
 					return p.Namespace == pod.Namespace && p.Object == obj
 				})
+				crashes.forget(pod.Namespace, pod.Name)
+
 			}
 		},
 	})

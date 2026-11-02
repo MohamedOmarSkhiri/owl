@@ -132,6 +132,7 @@ notifications:
   minSeverity: critical  # critical | warning (warning also sends warning events: much busier)
   resolved: true         # also send "resolved" and "cluster is back"
   cooldown: 10m          # at most one message per problem and state in this time
+  logLines: 5            # crashes: last log lines in the message, 0 to 20 (0 = exit code only, no log)
   existingSecret: ""     # your own Secret with any of: telegram-token, slack-webhook, discord-webhook, webhook-url
   telegram:
     token: ""            # from @BotFather

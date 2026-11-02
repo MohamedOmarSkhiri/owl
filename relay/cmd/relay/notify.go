@@ -18,6 +18,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,7 +36,8 @@ type Alert struct {
 	Reason    string    `json:"reason,omitempty"`
 	Message   string    `json:"message,omitempty"`
 	Time      time.Time `json:"time"`
-	URL       string    `json:"url,omitempty"` // link into Owl, when RELAY_PUBLIC_URL is set
+	URL       string    `json:"url,omitempty"`   // link into Owl, when RELAY_PUBLIC_URL is set
+	Crash     *Crash    `json:"crash,omitempty"` // exit code and the last logLines lines, for crashes
 }
 
 // channel is one place messages go to.
@@ -127,6 +130,7 @@ type Notifier struct {
 	minSeverity string // critical | warning
 	resolved    bool   // also send "resolved" and "back up"
 	cooldown    time.Duration
+	logLines    int // last log lines of a crash put in the message; 0 = none
 	client      *http.Client
 	queue       chan Alert
 
@@ -142,6 +146,7 @@ func notifierFromEnv() *Notifier {
 		minSeverity: env("RELAY_NOTIFY_MIN_SEVERITY", "critical"),
 		resolved:    env("RELAY_NOTIFY_RESOLVED", "true") != "false",
 		cooldown:    10 * time.Minute,
+		logLines:    5,
 		client:      &http.Client{Timeout: 10 * time.Second},
 		queue:       make(chan Alert, 100),
 		lastSent:    map[string]time.Time{},
@@ -156,6 +161,13 @@ func notifierFromEnv() *Notifier {
 			n.cooldown = d
 		} else {
 			log.Printf("notifications: RELAY_NOTIFY_COOLDOWN=%q is not a duration like 10m, using 10m", v)
+		}
+	}
+	if v := os.Getenv("RELAY_NOTIFY_LOG_LINES"); v != "" {
+		if l, err := strconv.Atoi(v); err == nil && l >= 0 && l <= maxLogLines {
+			n.logLines = l
+		} else {
+			log.Printf("notifications: RELAY_NOTIFY_LOG_LINES=%q is not 0 to %d, using 5", v, maxLogLines)
 		}
 	}
 	token, chat := os.Getenv("RELAY_NOTIFY_TELEGRAM_TOKEN"), os.Getenv("RELAY_NOTIFY_TELEGRAM_CHAT_ID")
@@ -204,11 +216,17 @@ func (n *Notifier) Problem(p Problem) {
 	if when.IsZero() { // agents leave it to the relay, like Store.UpsertProblem does
 		when = time.Now().UTC()
 	}
-	n.enqueue(Alert{
+	a := Alert{
 		Kind: "problem", State: state, Cluster: p.Cluster, Severity: p.Severity,
 		Namespace: p.Namespace, Object: p.Object, Reason: p.Reason, Message: p.Message,
 		Time: when, URL: n.link(p.Cluster, "problems"),
-	})
+	}
+	if p.Crash != nil && state == "open" {
+		c := *p.Crash // a copy: the store keeps the full log, the message only the end of it
+		c.Log = lastLines(c.Log, n.logLines)
+		a.Crash = &c
+	}
+	n.enqueue(a)
 }
 
 // checkClusters compares each cluster's health with the last check: down and back up.
@@ -319,10 +337,47 @@ func (n *Notifier) text(a Alert) string {
 		}
 		b.WriteString("\n" + msg)
 	}
+	if c := a.Crash; c != nil {
+		fmt.Fprintf(&b, "\nExit code %d", c.ExitCode)
+		if c.Reason != "" {
+			fmt.Fprintf(&b, " (%s)", c.Reason)
+		}
+		fmt.Fprintf(&b, ", %d restarts", c.Restarts)
+		if len(c.Log) > 0 {
+			b.WriteString("\nLast lines before the crash:")
+			for _, l := range c.Log {
+				if len(l) > maxLogLine {
+					l = strings.ToValidUTF8(l[:maxLogLine], "") + "…"
+				}
+				b.WriteString("\n> " + l)
+			}
+		}
+	}
 	if a.URL != "" {
 		b.WriteString("\n" + a.URL)
 	}
 	return b.String()
+}
+
+// Message size: Telegram refuses more than 4096 characters, so at most 20 lines of 150.
+const (
+	maxLogLines = 20
+	maxLogLine  = 150
+)
+
+// lastLines returns the last n non-blank lines (a crash's cause is usually at the end of its log).
+func lastLines(lines []string, n int) []string {
+	if n <= 0 {
+		return nil
+	}
+	out := []string{}
+	for i := len(lines) - 1; i >= 0 && len(out) < n; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			out = append(out, lines[i])
+		}
+	}
+	slices.Reverse(out) // back to oldest first
+	return out
 }
 
 type channelInfo struct {
@@ -345,6 +400,7 @@ func (s *server) getNotifications(w http.ResponseWriter, _ *http.Request) {
 		out["minSeverity"] = n.minSeverity
 		out["resolved"] = n.resolved
 		out["cooldown"] = n.cooldown.String()
+		out["logLines"] = n.logLines
 		out["publicUrl"] = n.publicURL
 	}
 	writeJSON(w, http.StatusOK, out)

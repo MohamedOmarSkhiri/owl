@@ -164,6 +164,10 @@ function NotificationsPanel({ status, onClose }: { status: NotifyStatus | undefi
               </p>
               <p>At most one message per problem every {duration(status.cooldown)}.</p>
               <p>
+                Crashes include the exit code
+                {status.logLines ? ` and the last ${status.logLines} log line${status.logLines === 1 ? '' : 's'}` : ''}.
+              </p>
+              <p>
                 {status.publicUrl ? (
                   <>Messages link to {status.publicUrl}.</>
                 ) : (

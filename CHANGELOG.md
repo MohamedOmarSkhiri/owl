@@ -4,6 +4,17 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-02
+
+### Added
+
+- Crash recorder: when a container crashes (CrashLoopBackOff, OOMKilled), the agent saves the exit code and the last 100 lines the container printed, before Kubernetes throws that log away at the next restart. The Problems view shows them under the problem, with what the exit code usually means and a download button.
+- Crash notifications include the exit code and the last 5 log lines (`notifications.logLines`, 0 to 20; 0 sends the exit code only).
+
+### Changed
+
+- Upgrade the relay and the agents together (the chart does): a 0.9.0 agent sends crash reports an older relay rejects.
+
 ## [0.8.1] - 2026-10-31
 
 ### Fixed
