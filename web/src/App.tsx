@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Navigate, NavLink, Route, Routes, useLocation, useParams } from 'react-router'
 import { api, getToken, percent, setToken, timeAgo, type Cluster } from './api'
@@ -8,6 +8,9 @@ import { UsageTab } from './components/usage'
 import { OverviewTab } from './components/overview'
 import { SECTIONS, Sidebar } from './components/sidebar'
 import { SignIn } from './components/signin'
+
+// The map brings a graph library (~250 KB): loaded only when the Map section is opened.
+const MapTab = lazy(() => import('./components/map'))
 
 export default function App() {
   const [signedIn, setSignedIn] = useState(() => !!getToken())
@@ -131,6 +134,10 @@ function ClusterView({ clusters }: { clusters: Cluster[] }) {
           <ProblemsTab key={cluster.id} cluster={cluster.id} />
         ) : tab === 'pods' ? (
           <PodsTab key={cluster.id} cluster={cluster.id} />
+        ) : tab === 'map' ? (
+          <Suspense fallback={<Loading label="Loading the map" />}>
+            <MapTab key={cluster.id} cluster={cluster.id} />
+          </Suspense>
         ) : tab === 'explore' ? (
           <ExploreTab key={cluster.id} cluster={cluster.id} />
         ) : tab === 'usage' ? (

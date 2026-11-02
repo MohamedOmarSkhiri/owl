@@ -128,6 +128,8 @@ jobs:
             'http://localhost:2300/v1/clusters/local/history?minutes=5' | grep -q '"running"'
           curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/info | grep -q '"persistent":true'
           curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/notifications | grep -q '"enabled":false'
+          curl -sf -H "Authorization: Bearer $TOKEN" 'http://localhost:2300/v1/clusters/local/map?namespace=owl' \
+            | jq -e 'any(.edges[]; .from == "Service/owl-relay" and .to == "Deployment/owl-relay")'          
           echo "agent reports, relay proxies live requests, RBAC works, usage and history answer"
       - name: History survives a relay restart
         run: |

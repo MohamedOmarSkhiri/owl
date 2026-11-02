@@ -13,6 +13,7 @@ Owl is a small, self-hosted dashboard for Kubernetes and K3s. Install it with He
 - **Crash recorder**: when a container crashes, its exit code and the last lines it printed, saved before Kubernetes throws them away
 - **Notifications**: Telegram, Slack, Discord or any webhook when a problem opens or a cluster goes down
 - **Pods**: status, restarts (and when), age; open any pod for live logs, download them, or read its YAML
+- **Map**: each namespace as a graph, like Argo CD: Ingress → Service → Deployment → Pods, with ConfigMaps, Secrets and volumes, colored by health
 - **Usage**: CPU and memory per node, workload and pod against requests, limits and capacity
 - **Explore**: any resource type in any namespace, CRDs included (HTTPRoute, Certificate, Application…), as YAML or JSON
 - **Many clusters in one place**: the cluster Owl runs in, plus any other cluster you give it a kubeconfig for
