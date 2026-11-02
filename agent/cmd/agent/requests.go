@@ -155,6 +155,8 @@ func (h *requestHandler) handle(parent context.Context, req *agentRequest) agent
 		out, err = h.logs(ctx, p)
 	case "usage":
 		out, err = h.usage(ctx, p)
+	case "map":
+		out, err = h.resourceMap(ctx, p)
 	default:
 		return agentResponse{Status: http.StatusBadRequest, Error: "unknown request kind " + req.Kind}
 	}

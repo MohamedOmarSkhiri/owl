@@ -4,6 +4,16 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-02
+
+### Added
+
+- Map: a namespace as a graph, like Argo CD's application tree. Ingresses and HTTPRoutes lead to Services, Services to the Deployments, StatefulSets and DaemonSets they select, then ReplicaSets, Jobs and Pods, with the ConfigMaps, Secrets (names only, never read) and volumes they use. Each box shows its health; failing paths are highlighted; a ConfigMap or Service that is referenced but missing shows as "not found". Click a box to open its logs or manifest. Pan, zoom, and hide pods or config to focus.
+
+### Changed
+
+- Upgrade the relay and the agents together (the chart does): the map needs a 0.10.0 agent.
+
 ## [0.9.0] - 2026-11-02
 
 ### Added

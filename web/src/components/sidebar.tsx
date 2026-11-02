@@ -13,6 +13,7 @@ export const SECTIONS = [
   { key: 'overview', label: 'Overview', count: undefined },
   { key: 'problems', label: 'Problems', count: (c: Cluster) => c.problemsOpen },
   { key: 'pods', label: 'Pods', count: (c: Cluster) => c.podsTotal },
+  { key: 'map', label: 'Map', count: undefined },
   { key: 'explore', label: 'Explore', count: undefined },
   { key: 'usage', label: 'Usage', count: undefined },
 ] as const

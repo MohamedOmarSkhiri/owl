@@ -157,6 +157,8 @@ export const api = {
   /** CPU, memory, pods and problems over the last `minutes` (kept by the relay, at most 60 days). */
   history: (id: string, minutes: number) =>
     get<HistoryPoint[]>(`/v1/clusters/${c(id)}/history`, { minutes: String(minutes) }),
+  /** One namespace as a graph: Ingress -> Service -> Deployment -> ReplicaSet -> Pods, ConfigMaps, PVCs. */
+  map: (id: string, namespace: string) => get<ResourceMap>(`/v1/clusters/${c(id)}/map`, { namespace }),
   info: () => get<{ version: string; persistent?: boolean }>('/v1/info'),
   /** Relay version, for the footer. */
   /** Which notification channels are on (secrets are never sent). */
@@ -287,4 +289,28 @@ export interface NotifyStatus {
   cooldown?: string // Go duration, e.g. "10m0s"
   logLines?: number // crash log lines in each message
   publicUrl?: string
+}
+// ---------- Resource map (one namespace as a graph, built by the agent) ----------
+
+export type MapHealth = 'ok' | 'warn' | 'bad' | 'none'
+
+export interface MapNode {
+  id: string // Kind/name
+  kind: string
+  name: string
+  group: string
+  version: string
+  resource: string
+  namespaced: boolean
+  status?: string
+  health: MapHealth
+  missing?: boolean // referenced but not found, or a Secret (never read): nothing to open
+}
+
+export interface ResourceMap {
+  namespace: string
+  nodes: MapNode[]
+  edges: { from: string; to: string }[]
+  truncated?: boolean
+  notes?: string[]
 }
