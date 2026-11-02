@@ -186,3 +186,48 @@ func TestNotificationEndpoints(t *testing.T) {
 		t.Fatalf("no channels: %d, want 409", r.StatusCode)
 	}
 }
+func TestCrashInTheMessage(t *testing.T) {
+	n := testNotifier(&recorder{})
+	n.logLines = 2
+	crash := &Crash{Container: "api", ExitCode: 137, Reason: "OOMKilled", Restarts: 4,
+		Log: []string{"starting", "loading cache", "allocating 2 GiB", "", strings.Repeat("x", 500), "  "}}
+	n.Problem(Problem{Cluster: "dev", Severity: "critical", Namespace: "shop", Object: "pod/api",
+		Reason: "OOMKilled", Message: "container api restarted 4 times", Crash: crash})
+	a := <-n.queue
+	if len(a.Crash.Log) != 2 || a.Crash.Log[0] != "allocating 2 GiB" {
+		t.Fatalf("alert log = %q, want the last 2 lines", a.Crash.Log)
+	}
+	if len(crash.Log) != 6 {
+		t.Fatal("the stored crash must keep its whole log")
+	}
+	got := n.text(a)
+	want := "🔴 OOMKilled\ndev: shop/pod/api\ncontainer api restarted 4 times\nExit code 137 (OOMKilled), 4 restarts\n" +
+		"Last lines before the crash:\n> allocating 2 GiB\n> " + strings.Repeat("x", maxLogLine) + "…"
+	if got != want {
+		t.Fatalf("text =\n%s\nwant\n%s", got, want)
+	}
+
+	// logLines=0: the exit code still, no log lines.
+	n = testNotifier(&recorder{})
+	n.Problem(Problem{Cluster: "dev", Severity: "critical", Object: "pod/api", Reason: "OOMKilled", Crash: crash})
+	if a := <-n.queue; a.Crash.Log != nil || strings.Contains(n.text(a), "Last lines") {
+		t.Fatalf("logLines=0 sent log lines: %q", n.text(a))
+	}
+}
+
+func TestStoreKeepsTheCrash(t *testing.T) {
+	st := NewStore()
+	c := &Crash{Container: "api", ExitCode: 1, Log: make([]string, 500)}
+	c.Log[499] = strings.Repeat("y", 5000)
+	c.trim()
+	if len(c.Log) != crashMaxLines || len(c.Log[crashMaxLines-1]) > crashMaxLine+len("…") {
+		t.Fatalf("trim: %d lines, last %d bytes", len(c.Log), len(c.Log[len(c.Log)-1]))
+	}
+	p := Problem{Cluster: "dev", Source: "pod", Severity: "critical", Object: "pod/api", Reason: "CrashLoopBackOff", Crash: c}
+	st.UpsertProblem(p)
+	p.Crash, p.Resolved = nil, true
+	st.UpsertProblem(p)
+	if got := st.Problems("dev", false); len(got) != 1 || got[0].Crash == nil || !got[0].Resolved {
+		t.Fatalf("problems = %+v", got)
+	}
+}

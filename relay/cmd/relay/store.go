@@ -2,6 +2,7 @@ package main
 
 import (
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -37,6 +38,41 @@ type Problem struct {
 	FirstSeen time.Time `json:"firstSeen"`
 	LastSeen  time.Time `json:"lastSeen"`
 	Resolved  bool      `json:"resolved"`
+	Crash     *Crash    `json:"crash,omitempty"` // CrashLoopBackOff and OOMKilled: how the last run ended
+}
+
+// Crash is sent by the agent's crash recorder: the exit of the container's last run and its
+// last log lines, read before Kubernetes throws them away at the next restart.
+type Crash struct {
+	Container  string    `json:"container"`
+	ExitCode   int32     `json:"exitCode"`
+	Reason     string    `json:"reason,omitempty"`
+	Signal     int32     `json:"signal,omitempty"`
+	FinishedAt time.Time `json:"finishedAt"`
+	Restarts   int32     `json:"restarts"`
+	Log        []string  `json:"log,omitempty"`
+	LogError   string    `json:"logError,omitempty"`
+}
+
+// Limits on what an agent can make the relay keep per problem (the agent sends 100 lines).
+const (
+	crashMaxLines = 200
+	crashMaxLine  = 2000
+)
+
+// trim keeps a crash within the limits, whatever the agent sent.
+func (c *Crash) trim() {
+	if c == nil {
+		return
+	}
+	if len(c.Log) > crashMaxLines {
+		c.Log = c.Log[len(c.Log)-crashMaxLines:] // keep the end: the lines just before the crash
+	}
+	for i, l := range c.Log {
+		if len(l) > crashMaxLine {
+			c.Log[i] = strings.ToValidUTF8(l[:crashMaxLine], "") + "…"
+		}
+	}
 }
 
 // ClusterView is what the app receives from GET /v1/clusters.
@@ -129,6 +165,9 @@ func (s *Store) UpsertProblem(p Problem) (notify bool) {
 	default:
 		p.ID = old.ID
 		p.FirstSeen = old.FirstSeen
+		if p.Crash == nil {
+			p.Crash = old.Crash // keep the last crash when the problem resolves
+		}
 		notify = p.Resolved && !old.Resolved
 		if !p.Resolved && old.Resolved {
 			notify = true // it came back

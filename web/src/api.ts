@@ -31,7 +31,21 @@ export interface Problem {
   firstSeen: string
   lastSeen: string
   resolved: boolean
+  crash?: Crash // CrashLoopBackOff and OOMKilled
 }
+
+/** How a container's last run ended, read by the agent when it crashed. */
+export interface Crash {
+  container: string
+  exitCode: number
+  reason?: string // Error, OOMKilled…
+  signal?: number
+  finishedAt: string
+  restarts: number
+  log?: string[] // its last lines, oldest first (up to 100)
+  logError?: string // why there is no log
+}
+
 
 export interface ResourceKind {
   group: string
@@ -271,5 +285,6 @@ export interface NotifyStatus {
   minSeverity?: 'critical' | 'warning'
   resolved?: boolean
   cooldown?: string // Go duration, e.g. "10m0s"
+  logLines?: number // crash log lines in each message
   publicUrl?: string
 }

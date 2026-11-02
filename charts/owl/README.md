@@ -79,6 +79,8 @@ Tokens and webhook URLs go into a Secret created by the chart. To keep them out 
 
 By default only critical problems are sent: CrashLoopBackOff, ImagePullBackOff and other container start errors, OOMKilled, failed pods, and a cluster going down. `minSeverity: warning` also sends pods pending for more than 5 minutes and Kubernetes warning events, which is much busier. The same problem sends at most one message per `cooldown` (10 minutes).
 
+For CrashLoopBackOff and OOMKilled, the message also gives the exit code and the last 5 lines the container printed before it died (`logLines`). Logs can contain sensitive data: set `logLines: 0` to send the exit code only. The full last 100 lines are always in the app, under the problem.
+
 ## Values
 
 | Key | Default | Description |
@@ -119,7 +121,7 @@ By default only critical problems are sent: CrashLoopBackOff, ImagePullBackOff a
 | `notifications.publicUrl` | `""` | How you open Owl; messages link to the problem |
 | `notifications.minSeverity` | `critical` | `critical` or `warning` |
 | `notifications.resolved` | `true` | Also send "resolved" and "cluster is back" |
-| `notifications.cooldown` | `10m` | At most one message per problem and state in this time |
+| `notifications.cooldown` | `10m` | At most one message per problem and state in this time |`notifications.logLines` | `5` | Crashes: last log lines in the message (0 to 20, 0 = exit code only) |
 | `notifications.telegram.token`, `.chatId` | `""` | Telegram bot |
 | `notifications.slack.webhookUrl` | `""` | Slack incoming webhook |
 | `notifications.discord.webhookUrl` | `""` | Discord webhook |

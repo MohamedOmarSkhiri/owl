@@ -47,6 +47,7 @@ spec:
             - {name: RELAY_NOTIFY_MIN_SEVERITY, value: {{ $n.minSeverity | default "critical" | quote }}}
             - {name: RELAY_NOTIFY_RESOLVED, value: {{ ne (toString $n.resolved) "false" | quote }}}
             - {name: RELAY_NOTIFY_COOLDOWN, value: {{ $n.cooldown | default "10m" | quote }}}
+            - {name: RELAY_NOTIFY_LOG_LINES, value: {{ hasKey $n "logLines" | ternary $n.logLines 5 | toString | quote }}}   # 0 must stay 0
             {{- with dig "telegram" "chatId" "" $n }}
             - {name: RELAY_NOTIFY_TELEGRAM_CHAT_ID, value: {{ . | quote }}}
             {{- end }}

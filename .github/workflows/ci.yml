@@ -80,6 +80,7 @@ jobs:
             --set notifications.webhook.url=https://example.com --set notifications.publicUrl=https://owl.example.com \
             | grep -q 'name: RELAY_NOTIFY_TELEGRAM_TOKEN'
           helm template owl charts/owl -n owl --set notifications.existingSecret=mine | grep -q 'name: mine'
+          helm template owl charts/owl -n owl --set notifications.logLines=0 | grep -q 'RELAY_NOTIFY_LOG_LINES, value: "0"'
           if helm template owl charts/owl -n owl --set relay.persistence.pv.enabled=true > /dev/null 2>&1; then
             echo "::error::pv.enabled without a path must fail"; exit 1
           fi
@@ -146,6 +147,17 @@ jobs:
           done
           echo "points after restart: $after"
           test "${after:-0}" -ge "$before"                             # without the volume it would start at 0 or 1
+      - name: Crash recorder keeps the log of a crashed container
+        run: |
+          TOKEN=$(kubectl -n owl get secret owl-tokens -o jsonpath='{.data.app-token}' | base64 -d)
+          kubectl create deployment crasher --image=busybox:1.36 -- sh -c 'echo owl-crash-marker; exit 3'
+          kubectl -n owl port-forward svc/owl-relay 2320:2300 &
+          sleep 3
+          crash() { curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2320/v1/clusters/local/problems \
+            | jq -e '[.[] | select(.reason == "CrashLoopBackOff") | .crash | select(.exitCode == 3) | .log[]?] | index("owl-crash-marker") != null'; }
+          for i in $(seq 1 40); do crash > /dev/null && break; sleep 5; done   # the 2nd crash starts CrashLoopBackOff
+          crash
+          echo "CrashLoopBackOff carries exit code 3 and the container's last line"
       - name: Logs on failure
         if: failure()
         run: |
