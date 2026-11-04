@@ -105,7 +105,12 @@ export class ApiError extends Error {
   }
 }
 
-async function get<T>(path: string, query?: Record<string, string | undefined>, method = 'GET'): Promise<T> {
+async function get<T>(
+  path: string,
+  query?: Record<string, string | undefined>,
+  method = 'GET',
+  signal?: AbortSignal, // lets the live map stop a waiting request when you leave it
+): Promise<T> {
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(query ?? {})) if (v) params.set(k, v)
   const url = params.size ? `${path}?${params}` : path
@@ -114,6 +119,7 @@ async function get<T>(path: string, query?: Record<string, string | undefined>, 
   try {
     res = await fetch(url, {
       method,
+      signal,
       headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     })
   } catch {
@@ -158,7 +164,8 @@ export const api = {
   history: (id: string, minutes: number) =>
     get<HistoryPoint[]>(`/v1/clusters/${c(id)}/history`, { minutes: String(minutes) }),
   /** One namespace as a graph: Ingress -> Service -> Deployment -> ReplicaSet -> Pods, ConfigMaps, PVCs. */
-  map: (id: string, namespace: string) => get<ResourceMap>(`/v1/clusters/${c(id)}/map`, { namespace }),
+  map: (id: string, namespace: string, since?: number, signal?: AbortSignal) =>
+    get<ResourceMap>(`/v1/clusters/${c(id)}/map`, { namespace, since: since === undefined ? undefined : String(since) }, 'GET', signal),
   info: () => get<{ version: string; persistent?: boolean }>('/v1/info'),
   /** Relay version, for the footer. */
   /** Which notification channels are on (secrets are never sent). */
@@ -311,6 +318,7 @@ export interface ResourceMap {
   namespace: string
   nodes: MapNode[]
   edges: { from: string; to: string }[]
+  rev?: number // send back as `since`: the agent answers at the next change (missing from 0.10.0 agents)
   truncated?: boolean
   notes?: string[]
 }

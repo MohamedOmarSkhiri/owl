@@ -129,7 +129,15 @@ jobs:
           curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/info | grep -q '"persistent":true'
           curl -sf -H "Authorization: Bearer $TOKEN" http://localhost:2300/v1/notifications | grep -q '"enabled":false'
           curl -sf -H "Authorization: Bearer $TOKEN" 'http://localhost:2300/v1/clusters/local/map?namespace=owl' \
-            | jq -e 'any(.edges[]; .from == "Service/owl-relay" and .to == "Deployment/owl-relay")'          
+            | jq -e 'any(.edges[]; .from == "Service/owl-relay" and .to == "Deployment/owl-relay")'
+          # Live map: a request with since=rev waits, and answers as soon as the namespace changes.
+          rev=$(curl -sf -H "Authorization: Bearer $TOKEN" 'http://localhost:2300/v1/clusters/local/map?namespace=default' | jq -e .rev)
+          (sleep 2; kubectl create deployment live-test --image=busybox:1.36 -- sleep 600) &
+          start=$(date +%s)
+          curl -sf --max-time 25 -H "Authorization: Bearer $TOKEN" "http://localhost:2300/v1/clusters/local/map?namespace=default&since=$rev" \
+            | jq -e 'any(.nodes[]; .id == "Deployment/live-test")'
+          took=$(( $(date +%s) - start )); echo "live map answered after ${took}s"
+          test "$took" -lt 10                                          # without the wake-up it would take 12 s          
           echo "agent reports, relay proxies live requests, RBAC works, usage and history answer"
       - name: History survives a relay restart
         run: |
