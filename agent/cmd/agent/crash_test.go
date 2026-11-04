@@ -36,6 +36,23 @@ func TestCrashLoopCarriesTheCrash(t *testing.T) {
 	}
 }
 
+func TestErrorBetweenRestartsKeepsTheCrashLoopOpen(t *testing.T) {
+	cs := crashed(4)
+	cs.State = corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 3, Reason: "Error"}}
+	got := podProblems(pod(corev1.PodRunning, cs))
+	if len(got) != 1 || got[0].Reason != "CrashLoopBackOff" || got[0].Crash == nil {
+		t.Fatalf("problems = %+v, want CrashLoopBackOff with its crash", got)
+	}
+	// A Job pod that is not restarted is not a loop.
+	p := pod(corev1.PodFailed, cs)
+	p.Spec.RestartPolicy = corev1.RestartPolicyNever
+	for _, pr := range podProblems(p) {
+		if pr.Reason == "CrashLoopBackOff" {
+			t.Fatal("restartPolicy Never must not be a crash loop")
+		}
+	}
+}
+
 func TestCrashRecorderReadsOncePerRestart(t *testing.T) {
 	cs := fake.NewClientset()
 	r := newCrashRecorder(cs)

@@ -231,6 +231,14 @@ func podProblems(pod *corev1.Pod) []Problem {
 				out[len(out)-1].Crash = crashOf(cs) // the log is added by the crash recorder
 			}
 		}
+		// Between two restarts, a crashing container is "Error" (terminated, exit code not 0)
+		// before Kubernetes shows CrashLoopBackOff again; on recent versions it can stay "Error"
+		// for most of the back-off. Still the same crash loop: keep the problem open.
+		if t := cs.State.Terminated; t != nil && t.ExitCode != 0 && cs.RestartCount > 0 &&
+			pod.Spec.RestartPolicy != corev1.RestartPolicyNever && pod.DeletionTimestamp == nil {
+			add("critical", "CrashLoopBackOff", fmt.Sprintf("container %s exited with code %d (%s), restarting", cs.Name, t.ExitCode, t.Reason))
+			out[len(out)-1].Crash = crashOf(cs)
+		}
 		if t := cs.LastTerminationState.Terminated; t != nil && t.Reason == "OOMKilled" && cs.RestartCount > 0 {
 			add("critical", "OOMKilled", fmt.Sprintf("container %s restarted %d times", cs.Name, cs.RestartCount))
 			out[len(out)-1].Crash = crashOf(cs)
