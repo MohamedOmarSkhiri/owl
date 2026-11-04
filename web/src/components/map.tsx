@@ -1,7 +1,9 @@
 // Map: one namespace as a graph, like Argo CD's application tree.
 // The agent builds the graph (who owns, selects or uses what); this file lays it out left to
-// right with dagre and draws it with React Flow (pan, zoom, minimap).
-import { memo, useEffect, useMemo, useState, type ComponentType } from 'react'
+// right with dagre and draws it with React Flow (pan, zoom). It is live: each request waits at
+// the agent until something in the namespace changes (long-poll), so the map follows the cluster
+// within about a second.
+import { memo, useCallback, useEffect, useMemo, useState, type ComponentType } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import dagre from '@dagrejs/dagre'
 import {
@@ -40,7 +42,6 @@ import { ObjectPanel, PodPanel } from './panels'
 import { NamespaceSelect } from './tabs'
 import { ErrorNote, Loading } from './ui'
 
-const REFRESH = 15_000
 const NODE_W = 236
 const NODE_H = 58
 
@@ -73,6 +74,70 @@ const HEALTH: Record<MapHealth, { color: string; label: string }> = {
 
 type OwlNode = Node<{ item: MapNode }, 'owl'>
 
+/** Generated names (pods, ReplicaSets, Jobs) differ at the end: show the end, not the start. */
+function shownName(item: MapNode): string {
+  const generated = item.kind === 'Pod' || item.kind === 'ReplicaSet' || item.kind === 'Job'
+  return generated && item.name.length > 20 ? `…${item.name.slice(-18)}` : item.name
+}
+
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((done) => {
+    const t = setTimeout(done, ms)
+    signal.addEventListener('abort', () => (clearTimeout(t), done()), { once: true })
+  })
+
+/**
+ * The live map: ask, draw, ask again with `since` = the answer's rev. The agent holds each
+ * request until the namespace changes (or 12 s), so this loop is not busy: one request per change.
+ */
+function useLiveMap(cluster: string, namespace: string) {
+  const [data, setData] = useState<ResourceMap>()
+  const [error, setError] = useState<unknown>()
+  const [updated, setUpdated] = useState(0)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    const stop = new AbortController()
+    setData(undefined)
+    setError(undefined)
+    ;(async () => {
+      let since: number | undefined
+      while (!stop.signal.aborted) {
+        const asked = Date.now()
+        try {
+          const m = await api.map(cluster, namespace, since, stop.signal)
+          if (stop.signal.aborted) return
+          setData(m)
+          setError(undefined)
+          setUpdated(Date.now())
+          // An older agent or relay answers at once without waiting: then ask every 5 s, not in a loop.
+          const waited = m.rev !== undefined && (m.rev !== since || Date.now() - asked > 1000)
+          since = m.rev
+          if (!waited) await sleep(5_000, stop.signal)
+        } catch (e) {
+          if (stop.signal.aborted) return
+          setError(e) // agent offline or restarting: show it, try again shortly
+          await sleep(3_000, stop.signal)
+        }
+      }
+    })()
+    return () => stop.abort()
+  }, [cluster, namespace, attempt])
+
+  const retry = useCallback(() => setAttempt((a) => a + 1), [])
+  return { data, error, updated, retry }
+}
+
+/** "updated 3 s ago", ticking every second. */
+function useSecondsSince(t: number) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const i = setInterval(() => setNow(Date.now()), 1_000)
+    return () => clearInterval(i)
+  }, [])
+  return t ? Math.max(0, Math.round((now - t) / 1000)) : undefined
+}
+
 /** One box: a colored bar for health, the kind's icon, the name and its status. */
 const ResourceNode = memo(function ResourceNode({ data }: NodeProps<OwlNode>) {
   const { item } = data
@@ -93,7 +158,7 @@ const ResourceNode = memo(function ResourceNode({ data }: NodeProps<OwlNode>) {
       <span className="min-w-0 flex-1 leading-tight">
         <span className="flex items-baseline gap-1.5">
           <span className="shrink-0 font-mono text-[10px] text-muted uppercase">{k.short}</span>
-          <span className="truncate text-[13px] font-medium text-ink">{item.name}</span>
+          <span className="truncate text-[13px] font-medium text-ink">{shownName(item)}</span>
         </span>
         {item.status && (
           <span className={`mt-0.5 block truncate text-[11px] ${item.health === 'bad' ? 'text-bad' : 'text-muted'}`}>
@@ -196,7 +261,8 @@ function NamespaceMap({ cluster, namespace, onNamespace }: { cluster: string; na
   const [showConfig, setShowConfig] = useState(true)
   const [open, setOpen] = useState<MapNode | null>(null)
   const flow = useReactFlow()
-  const q = useQuery({ queryKey: ['map', cluster, namespace], queryFn: () => api.map(cluster, namespace), refetchInterval: REFRESH })
+  const q = useLiveMap(cluster, namespace)
+  const age = useSecondsSince(q.updated)
 
   // Lay out again only when the shape changes, so a refresh that only changes health does not move boxes.
   const shape = q.data ? `${q.data.nodes.map((n) => n.id).join()}|${q.data.edges.map((e) => e.from + e.to).join()}` : ''
@@ -232,6 +298,10 @@ function NamespaceMap({ cluster, namespace, onNamespace }: { cluster: string; na
           <input type="checkbox" checked={showConfig} onChange={(e) => setShowConfig(e.target.checked)} className="size-4 accent-[var(--color-blue)]" />
           Config and storage
         </label>
+        <span className="flex items-center gap-1.5 text-xs text-muted" aria-live="off">
+          <span className={`size-2 rounded-full ${q.error ? 'bg-warn-soft' : 'animate-pulse bg-ok'}`} aria-hidden />
+          {q.error && q.data ? 'Reconnecting…' : age === undefined ? 'Connecting…' : `Live · updated ${age} s ago`}
+        </span>
         <ul className="ml-auto flex flex-wrap items-center gap-4 text-xs text-muted" aria-label="Legend">
           {(['ok', 'warn', 'bad'] as const).map((h) => (
             <li key={h} className="flex items-center gap-1.5">
@@ -249,10 +319,10 @@ function NamespaceMap({ cluster, namespace, onNamespace }: { cluster: string; na
         </div>
       )}
       <div className="relative min-h-0 flex-1">
-        {q.isPending ? (
+        {!q.data && q.error ? (
+          <ErrorNote error={q.error} onRetry={q.retry} />
+        ) : !q.data ? (
           <Loading />
-        ) : q.isError ? (
-          <ErrorNote error={q.error} onRetry={() => q.refetch()} />
         ) : q.data.nodes.length === 0 ? (
           <p className="px-6 py-16 text-center text-muted">Nothing to map in {namespace}.</p>
         ) : (

@@ -127,16 +127,18 @@ func (t *tracker) send(p Problem) {
 
 // raise opens a problem, or refreshes lastSeen if it is already open.
 func (t *tracker) raise(p Problem) {
-	now := time.Now().UTC()
 	p.Cluster = t.cluster
-	p.LastSeen = now
+	if p.LastSeen.IsZero() { // events bring their own time; pod problems are "now"
+		p.LastSeen = time.Now().UTC()
+	}
 
 	t.mu.Lock()
 	old, exists := t.open[p.key()]
-	if exists {
+	switch {
+	case exists:
 		p.FirstSeen = old.FirstSeen
-	} else {
-		p.FirstSeen = now
+	case p.FirstSeen.IsZero():
+		p.FirstSeen = p.LastSeen
 	}
 	t.open[p.key()] = p
 	t.mu.Unlock()
@@ -238,6 +240,27 @@ func podProblems(pod *corev1.Pod) []Problem {
 	return out
 }
 
+// eventTimes: when a warning event last and first happened. The API has three ways to say it:
+// lastTimestamp/firstTimestamp (classic), series.lastObservedTime and eventTime (newer).
+// Zero times are left zero; raise then uses "now".
+func eventTimes(ev *corev1.Event) (last, first time.Time) {
+	last = ev.LastTimestamp.Time
+	if ev.Series != nil && ev.Series.LastObservedTime.After(last) {
+		last = ev.Series.LastObservedTime.Time
+	}
+	if last.IsZero() {
+		last = ev.EventTime.Time
+	}
+	first = ev.FirstTimestamp.Time
+	if first.IsZero() {
+		first = ev.EventTime.Time
+	}
+	if first.IsZero() || first.After(last) {
+		first = last
+	}
+	return last.UTC(), first.UTC()
+}
+
 func nodeReady(n *corev1.Node) bool {
 	for _, c := range n.Status.Conditions {
 		if c.Type == corev1.NodeReady {
@@ -308,6 +331,17 @@ func main() {
 	evInf := factory.Core().V1().Events()
 	crashes := newCrashRecorder(client) // reads the log of each crashed run once (crash.go)
 
+	// The live map waits for changes in a namespace (changes.go). Pods are already watched;
+	// these informers add the workloads and Services, read from the same shared watches.
+	changes := newNSChanges()
+	podInf.Informer().AddEventHandler(changes.handler())
+	factory.Apps().V1().Deployments().Informer().AddEventHandler(changes.handler())
+	factory.Apps().V1().ReplicaSets().Informer().AddEventHandler(changes.handler())
+	factory.Apps().V1().StatefulSets().Informer().AddEventHandler(changes.handler())
+	factory.Apps().V1().DaemonSets().Informer().AddEventHandler(changes.handler())
+	factory.Batch().V1().Jobs().Informer().AddEventHandler(changes.handler())
+	factory.Core().V1().Services().Informer().AddEventHandler(changes.handler())
+
 	// evaluatePod raises the pod's current problems and resolves the ones that cleared.
 	evaluatePod := func(pod *corev1.Pod) {
 		obj := "pod/" + pod.Name
@@ -355,10 +389,7 @@ func main() {
 		if !ok || ev.Type != corev1.EventTypeWarning {
 			return
 		}
-		last := ev.LastTimestamp.Time
-		if last.IsZero() {
-			last = ev.EventTime.Time
-		}
+		last, first := eventTimes(ev)
 		if !last.IsZero() && last.Before(started.Add(-eventTTL)) {
 			return // old backlog from before the agent started
 		}
@@ -366,6 +397,7 @@ func main() {
 			Source: "event", Severity: "warning", Namespace: ev.Namespace,
 			Object: strings.ToLower(ev.InvolvedObject.Kind) + "/" + ev.InvolvedObject.Name,
 			Reason: ev.Reason, Message: ev.Message,
+			FirstSeen: first, LastSeen: last, // when it happened, not when the agent saw it
 		})
 	}
 	evInf.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -383,7 +415,7 @@ func main() {
 	log.Print("caches synced, reporting")
 
 	// Answer live requests from the app (resource browser, pod logs) via the relay.
-	go serveRequests(ctx, cfg, client, podInf.Lister(), nodeInf.Lister(), relay, *clusterName)
+	go serveRequests(ctx, cfg, client, podInf.Lister(), nodeInf.Lister(), changes, relay, *clusterName)
 
 	podLister := podInf.Lister()
 	nodeLister := nodeInf.Lister()

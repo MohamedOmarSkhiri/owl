@@ -65,21 +65,22 @@ type ResourceItem struct {
 var errSecretsBlocked = errors.New("secrets are not exposed by the KubePulse agent")
 
 type requestHandler struct {
-	cs    kubernetes.Interface
-	dyn   dynamic.Interface
-	pods  listerscorev1.PodLister  // informer caches: requests, limits, owners, node placement
-	nodes listerscorev1.NodeLister // without extra API calls
+	cs      kubernetes.Interface
+	dyn     dynamic.Interface
+	pods    listerscorev1.PodLister  // informer caches: requests, limits, owners, node placement
+	nodes   listerscorev1.NodeLister // without extra API calls
+	changes *nsChanges               // per-namespace change counter, for the live map (changes.go)
 }
 
 // serveRequests long-polls the relay and answers each request in its own goroutine.
 func serveRequests(ctx context.Context, cfg *rest.Config, cs kubernetes.Interface,
-	pods listerscorev1.PodLister, nodes listerscorev1.NodeLister, relay *relayClient, cluster string) {
+	pods listerscorev1.PodLister, nodes listerscorev1.NodeLister, changes *nsChanges, relay *relayClient, cluster string) {
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		log.Printf("live requests disabled: %v", err)
 		return
 	}
-	h := &requestHandler{cs: cs, dyn: dyn, pods: pods, nodes: nodes}
+	h := &requestHandler{cs: cs, dyn: dyn, pods: pods, nodes: nodes, changes: changes}
 	poll := &http.Client{Timeout: 40 * time.Second} // relay holds a poll up to 25s
 	pollURL := relay.base + "/v1/agent/requests?cluster=" + url.QueryEscape(cluster)
 
@@ -100,7 +101,8 @@ func serveRequests(ctx context.Context, cfg *rest.Config, cs kubernetes.Interfac
 		}
 		go func(req *agentRequest) {
 			resp := h.handle(ctx, req)
-			if err := relay.post("/v1/agent/responses/"+url.PathEscape(req.ID), resp); err != nil {
+			// A 404 means the app stopped waiting (closed the page, switched namespace): normal.
+			if err := relay.post("/v1/agent/responses/"+url.PathEscape(req.ID), resp); err != nil && !strings.Contains(err.Error(), "HTTP 404") {
 				log.Printf("answer %s failed: %v", req.Kind, err)
 			}
 		}(req)

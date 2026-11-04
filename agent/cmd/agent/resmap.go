@@ -15,6 +15,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -58,6 +59,7 @@ type ResourceMap struct {
 	Namespace string    `json:"namespace"`
 	Nodes     []MapNode `json:"nodes"`
 	Edges     []MapEdge `json:"edges"`
+	Rev       uint64    `json:"rev"`                 // changes seen in the namespace: send it back as "since"
 	Truncated bool      `json:"truncated,omitempty"` // more than mapMaxNodes: pods were left out
 	Notes     []string  `json:"notes,omitempty"`     // e.g. a resource type the agent may not read
 }
@@ -110,6 +112,20 @@ func (h *requestHandler) resourceMap(ctx context.Context, p map[string]string) (
 	if ns == "" {
 		return nil, apierrors.NewBadRequest("namespace is required")
 	}
+	// Live map: with since = the rev of the app's last answer, wait for the next change (or 12 s).
+	// Then a short pause, because one action is several changes: deleting a pod also updates
+	// its ReplicaSet and Deployment. The relay gives up after 20 s, so 12 s leaves room.
+	if v := p["since"]; v != "" && h.changes != nil {
+		if since, err := strconv.ParseUint(v, 10, 64); err == nil {
+			h.changes.wait(ctx, ns, since, 12*time.Second)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(300 * time.Millisecond):
+			}
+		}
+	}
+	rev := h.changes.current(ns) // read before listing: a change during the lists wakes the next request
 	in := mapInput{namespace: ns, configMaps: map[string]bool{}, pvs: map[string]*corev1.PersistentVolume{}}
 	opts := metav1.ListOptions{}
 
@@ -180,7 +196,9 @@ func (h *requestHandler) resourceMap(ctx context.Context, p map[string]string) (
 	if l, err := h.dyn.Resource(routes).Namespace(ns).List(ctx, opts); !skip("HTTPRoutes", err) {
 		in.httpRoutes = l.Items
 	}
-	return buildMap(in), nil
+	m := buildMap(in)
+	m.Rev = rev
+	return m, nil
 }
 
 // graph collects nodes and edges without duplicates.
@@ -295,6 +313,8 @@ func buildMap(in mapInput) *ResourceMap {
 		status, healthy := podStatus(p)
 		health := "ok"
 		switch {
+		case p.DeletionTimestamp != nil:
+			health = "warn" // Terminating: on its way out
 		case p.Status.Phase == corev1.PodPending && !healthy && !podHasBadWait(p):
 			health = "warn" // starting: scheduling, pulling, init containers
 		case !healthy:
