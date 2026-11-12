@@ -43,6 +43,9 @@ func TestErrorBetweenRestartsKeepsTheCrashLoopOpen(t *testing.T) {
 	if len(got) != 1 || got[0].Reason != "CrashLoopBackOff" || got[0].Crash == nil {
 		t.Fatalf("problems = %+v, want CrashLoopBackOff with its crash", got)
 	}
+	if c := got[0].Crash; c.ExitCode != 3 || !c.current { // the run that just ended, not the one before (exit 1)
+		t.Fatalf("crash = %+v, want the current run (exit 3)", c)
+	}
 	// A Job pod that is not restarted is not a loop.
 	p := pod(corev1.PodFailed, cs)
 	p.Spec.RestartPolicy = corev1.RestartPolicyNever

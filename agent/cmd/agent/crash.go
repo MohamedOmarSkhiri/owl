@@ -33,6 +33,7 @@ type Crash struct {
 	Restarts   int32     `json:"restarts"`
 	Log        []string  `json:"log,omitempty"`      // last lines of that run, oldest first
 	LogError   string    `json:"logError,omitempty"` // why there is no log, if there is none
+	current    bool      // the run that ended is still the current container (Error, not restarted yet)
 }
 
 // crashOf reads the container's previous run from its status; nil if it never ended.
@@ -41,6 +42,22 @@ func crashOf(cs corev1.ContainerStatus) *Crash {
 	if t == nil {
 		return nil
 	}
+	return crashFrom(cs, t)
+}
+
+// crashOfCurrent reads the run that just ended and is not restarted yet ("Error" state).
+// Same run, same restart count as the CrashLoopBackOff that follows, so it shares its log.
+func crashOfCurrent(cs corev1.ContainerStatus) *Crash {
+	t := cs.State.Terminated
+	if t == nil {
+		return nil
+	}
+	c := crashFrom(cs, t)
+	c.current = true
+	return c
+}
+
+func crashFrom(cs corev1.ContainerStatus, t *corev1.ContainerStateTerminated) *Crash {
 	return &Crash{
 		Container: cs.Name, ExitCode: t.ExitCode, Reason: t.Reason, Signal: t.Signal,
 		FinishedAt: t.FinishedAt.Time.UTC(), Restarts: cs.RestartCount,
@@ -74,7 +91,7 @@ func (r *crashRecorder) fill(ctx context.Context, namespace, pod string, c *Cras
 	l, ok := r.logs[key]
 	r.mu.Unlock()
 	if !ok {
-		l = r.read(ctx, namespace, pod, c.Container)
+		l = r.read(ctx, namespace, pod, c.Container, !c.current)
 		r.mu.Lock()
 		if len(r.logs) >= 1000 { // many crashing pods for a long time: start over, it only costs a re-read
 			r.logs = map[string]crashLog{}
@@ -85,12 +102,12 @@ func (r *crashRecorder) fill(ctx context.Context, namespace, pod string, c *Cras
 	c.Log, c.LogError = l.lines, l.err
 }
 
-func (r *crashRecorder) read(ctx context.Context, namespace, pod, container string) crashLog {
+func (r *crashRecorder) read(ctx context.Context, namespace, pod, container string, previous bool) crashLog {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	tail, limit := int64(crashLogLines), int64(crashLogBytes)
 	raw, err := r.cs.CoreV1().Pods(namespace).GetLogs(pod, &corev1.PodLogOptions{
-		Container: container, Previous: true, TailLines: &tail, LimitBytes: &limit,
+		Container: container, Previous: previous, TailLines: &tail, LimitBytes: &limit,
 	}).DoRaw(ctx)
 	if err != nil {
 		msg := err.Error()

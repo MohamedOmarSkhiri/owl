@@ -237,7 +237,7 @@ func podProblems(pod *corev1.Pod) []Problem {
 		if t := cs.State.Terminated; t != nil && t.ExitCode != 0 && cs.RestartCount > 0 &&
 			pod.Spec.RestartPolicy != corev1.RestartPolicyNever && pod.DeletionTimestamp == nil {
 			add("critical", "CrashLoopBackOff", fmt.Sprintf("container %s exited with code %d (%s), restarting", cs.Name, t.ExitCode, t.Reason))
-			out[len(out)-1].Crash = crashOf(cs)
+			out[len(out)-1].Crash = crashOfCurrent(cs) // this run, not LastTerminationState (the one before)
 		}
 		if t := cs.LastTerminationState.Terminated; t != nil && t.Reason == "OOMKilled" && cs.RestartCount > 0 {
 			add("critical", "OOMKilled", fmt.Sprintf("container %s restarted %d times", cs.Name, cs.RestartCount))
