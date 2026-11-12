@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertOctagon, AlertTriangle, BellRing, Search } from 'lucide-react'
-import { api, kindLabel, NAMESPACES, PODS, sameKind, timeAgo, type Problem, type ResourceItem, type ResourceKind } from '../api'
+import { api, kindLabel, NAMESPACES, PODS, PROBLEM_KINDS, sameKind, timeAgo, type Problem, type ResourceItem, type ResourceKind } from '../api'
 import { CrashReport } from './crash'
 import { ObjectPanel, PodPanel } from './panels'
 import { ResourceTable } from './ResourceTable'
@@ -63,9 +63,12 @@ export function ProblemsTab({ cluster }: { cluster: string }) {
   const [open, setOpen] = useState<Open>(null)
   const q = useQuery({ queryKey: ['problems', cluster], queryFn: () => api.problems(cluster), refetchInterval: REFRESH })
 
-  const openProblem = (p: Problem) => {
+  // The object a problem is about: a pod opens with its logs, the others as YAML.
+  const target = (p: Problem): Open => {
     const [type, ...rest] = p.object.split('/')
-    if (type === 'pod') setOpen({ kind: PODS, namespace: p.namespace, name: rest.join('/') })
+    const kind = type === 'pod' ? PODS : PROBLEM_KINDS[type]
+    if (!kind || rest.length === 0) return null
+    return { kind, namespace: kind.namespaced ? p.namespace : undefined, name: rest.join('/') }
   }
 
   if (q.isPending) return <Loading />
@@ -77,12 +80,12 @@ export function ProblemsTab({ cluster }: { cluster: string }) {
     <>
       <ul className="divide-y divide-line">
         {q.data.map((p) => {
-          const isPod = p.object.startsWith('pod/')
+          const t = target(p)
           return (
             <li key={p.id} className="pb-0.5">
               <button
-                onClick={() => openProblem(p)}
-                disabled={!isPod}
+                onClick={() => setOpen(t)}
+                disabled={!t}
                 className="flex w-full items-start gap-3 px-5 py-3.5 text-left enabled:hover:bg-sunken/70"
               >
                 <span className="mt-0.5">{p.source === 'alertmanager' ? <BellRing size={18} className="text-bad" /> : severityIcon[p.severity]}</span>

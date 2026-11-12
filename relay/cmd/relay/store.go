@@ -29,7 +29,7 @@ type Snapshot struct {
 type Problem struct {
 	ID        string    `json:"id"`
 	Cluster   string    `json:"cluster"`
-	Source    string    `json:"source"`   // pod | event | alertmanager
+	Source    string    `json:"source"`   // pod | event | node | workload | storage | alertmanager
 	Severity  string    `json:"severity"` // critical | warning
 	Namespace string    `json:"namespace"`
 	Object    string    `json:"object"`

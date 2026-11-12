@@ -4,6 +4,20 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-12
+
+### Added
+
+- Problems beyond pods. Owl now also reports:
+  - nodes that are not Ready for a minute, or under memory, disk or PID pressure;
+  - Deployments whose rollout is stuck (`progressDeadlineSeconds` passed);
+  - Deployments, StatefulSets and DaemonSets with fewer ready replicas than wanted for 10 minutes (critical when none is ready);
+  - Jobs that failed in the last 24 hours, and CronJobs whose last run failed (cleared when a later run succeeds);
+  - PersistentVolumeClaims that lost their volume, or stay Pending for 5 minutes although they should be provisioned. Claims of a `WaitForFirstConsumer` class, like k3s local-path, are only flagged once a pod needs them.
+
+  They show in the Problems view and trigger notifications like the others, and close by themselves when fixed.
+- Click any problem about a node, workload, Job or volume to open its YAML (pods still open with their logs).
+
 ## [0.10.2] - 2026-11-12
 
 ### Fixed
