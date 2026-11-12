@@ -39,6 +39,7 @@ type Problem struct {
 	LastSeen  time.Time `json:"lastSeen"`
 	Resolved  bool      `json:"resolved"`
 	Crash     *Crash    `json:"crash,omitempty"` // CrashLoopBackOff and OOMKilled: how the last run ended
+	Muted     *Mute     `json:"muted,omitempty"` // set when the app reads problems (mutes.go), never stored
 }
 
 // Crash is sent by the agent's crash recorder: the exit of the container's last run and its
@@ -89,7 +90,8 @@ type ClusterView struct {
 	LastSeen    time.Time `json:"lastSeen"`
 	// Added in 0.6.0 for the sidebar and the Overview.
 	PodsCompleted int          `json:"podsCompleted"`
-	ProblemsOpen  int          `json:"problemsOpen"`
+	ProblemsOpen  int          `json:"problemsOpen"` // not muted (0.12.0)
+	ProblemsMuted int          `json:"problemsMuted"`
 	Usage         *UsageTotals `json:"usage,omitempty"`
 }
 

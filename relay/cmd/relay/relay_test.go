@@ -20,7 +20,7 @@ const (
 // newTestServer builds the same routes as main() on an httptest server.
 func newTestServer(t *testing.T, webDir string) (*server, *httptest.Server) {
 	t.Helper()
-	s := &server{store: NewStore(), broker: NewBroker()}
+	s := &server{store: NewStore(), broker: NewBroker(), mutes: NewMutes("")}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.Write([]byte("ok\n")) })
 	mux.HandleFunc("POST /v1/agent/snapshot", requireToken(agentTok, s.postSnapshot))
@@ -29,6 +29,9 @@ func newTestServer(t *testing.T, webDir string) (*server, *httptest.Server) {
 	mux.HandleFunc("POST /v1/agent/responses/{reqId}", requireToken(agentTok, s.agentRespond))
 	mux.HandleFunc("GET /v1/clusters", requireToken(appTok, s.getClusters))
 	mux.HandleFunc("GET /v1/clusters/{id}/problems", requireToken(appTok, s.getProblems))
+	mux.HandleFunc("GET /v1/clusters/{id}/mutes", requireToken(appTok, s.getMutes))
+	mux.HandleFunc("POST /v1/clusters/{id}/mutes", requireToken(appTok, s.postMute))
+	mux.HandleFunc("DELETE /v1/clusters/{id}/mutes/{muteId}", requireToken(appTok, s.deleteMute))
 	mux.HandleFunc("GET /v1/clusters/{id}/pods/{ns}/{name}/logs", requireToken(appTok, s.proxy("logs", logParams)))
 	if webDir != "" {
 		mux.Handle("GET /", webApp(webDir))

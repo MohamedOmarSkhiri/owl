@@ -36,7 +36,7 @@ helm upgrade --install owl oci://ghcr.io/mohamedomarskhiri/charts/owl -n owl --r
 
 ## History storage
 
-The relay keeps 60 days of history in `/data/history.json` (about 1.2 MB per cluster). Pick where `/data` lives:
+The relay keeps 60 days of history in `/data/history.json` (about 1.2 MB per cluster), and the mutes in `/data/mutes.json`. Pick where `/data` lives:
 
 | You have | Values | What happens |
 |---|---|---|
@@ -46,7 +46,7 @@ The relay keeps 60 days of history in `/data/history.json` (about 1.2 MB per clu
 | A folder on a node, no StorageClass | `relay.persistence.pv.enabled=true`, `pv.hostPath=/var/lib/owl` | The chart creates the PersistentVolume and its claim |
 | An NFS share | `relay.persistence.pv.enabled=true`, `pv.nfs.server=…`, `pv.nfs.path=…` | Same, on NFS |
 | Your own claim | `relay.persistence.existingClaim=my-claim` | Used as is |
-| No storage at all | `relay.persistence.enabled=false` | Memory and `emptyDir`: history is lost when the pod is replaced |
+| No storage at all | `relay.persistence.enabled=false` | Memory and `emptyDir`: history and mutes are lost when the pod is replaced |
 
 The relay runs as user 65532. Volumes from a StorageClass are made writable automatically (`fsGroup`); a node folder or an NFS export must be writable by that user:
 

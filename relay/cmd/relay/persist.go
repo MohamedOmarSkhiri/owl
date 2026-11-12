@@ -41,9 +41,13 @@ func (s *Store) SaveHistory(dir string) error {
 	if err != nil {
 		return err
 	}
-	// Write a temporary file, flush it to disk, then rename it over the old one.
-	// rename is atomic: readers see either the old file or the new one, never half of one.
-	tmp, err := os.CreateTemp(dir, historyFile+".*.tmp")
+	return writeFileAtomic(dir, historyFile, data)
+}
+
+// writeFileAtomic writes a temporary file, flushes it to disk, then renames it over the old one.
+// rename is atomic: readers see either the old file or the new one, never half of one.
+func writeFileAtomic(dir, name string, data []byte) error {
+	tmp, err := os.CreateTemp(dir, name+".*.tmp")
 	if err != nil {
 		return err
 	}
@@ -59,7 +63,7 @@ func (s *Store) SaveHistory(dir string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, historyFile))
+	return os.Rename(tmp.Name(), filepath.Join(dir, name))
 }
 
 // LoadHistory reads dir/history.json. A missing file is fine: first start.
