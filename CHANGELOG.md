@@ -4,6 +4,20 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-11-12
+
+### Added
+
+- Mute problems. From the Problems view, mute one problem, every problem with the same reason in its namespace, or a whole namespace, for 1 hour, 1 day, 1 week, or until the problem resolves. Muted problems send no notifications (opening or resolved) and stay listed, greyed out at the bottom, with Unmute.
+- Acknowledge a problem: mute it until it resolves, with a note ("known, fixing Monday") shown under it. The mute ends by itself when the problem resolves.
+- Mutes wider than one problem are listed at the top of Problems, so none is forgotten.
+- Mutes are kept in `/data/mutes.json` next to the history and survive restarts and upgrades.
+- API: `GET`, `POST /v1/clusters/{id}/mutes` and `DELETE /v1/clusters/{id}/mutes/{muteId}`.
+
+### Changed
+
+- The problem count in the sidebar and the Overview no longer includes muted problems; `GET /v1/clusters` gives them as `problemsMuted`. Cluster health still takes every problem into account.
+
 ## [0.11.0] - 2026-11-12
 
 ### Added

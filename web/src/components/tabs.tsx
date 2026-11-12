@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertOctagon, AlertTriangle, BellRing, Search } from 'lucide-react'
 import { api, kindLabel, NAMESPACES, PODS, PROBLEM_KINDS, sameKind, timeAgo, type Problem, type ResourceItem, type ResourceKind } from '../api'
 import { CrashReport } from './crash'
+import { ActiveMutes, MutedLine, MuteControl } from './mutes'
 import { ObjectPanel, PodPanel } from './panels'
 import { ResourceTable } from './ResourceTable'
 import { ErrorNote, inputClass, Loading, Panel } from './ui'
@@ -62,6 +63,12 @@ const severityIcon = {
 export function ProblemsTab({ cluster }: { cluster: string }) {
   const [open, setOpen] = useState<Open>(null)
   const q = useQuery({ queryKey: ['problems', cluster], queryFn: () => api.problems(cluster), refetchInterval: REFRESH })
+  const mutes = useQuery({ queryKey: ['mutes', cluster], queryFn: () => api.mutes(cluster), refetchInterval: REFRESH })
+  // Muted problems go last: what is left on top is what needs someone.
+  const problems = useMemo(
+    () => [...(q.data ?? [])].sort((a, b) => Number(!!a.muted) - Number(!!b.muted)),
+    [q.data],
+  )
 
   // The object a problem is about: a pod opens with its logs, the others as YAML.
   const target = (p: Problem): Open => {
@@ -73,20 +80,27 @@ export function ProblemsTab({ cluster }: { cluster: string }) {
 
   if (q.isPending) return <Loading />
   if (q.isError) return <ErrorNote error={q.error} onRetry={() => q.refetch()} />
-  if (q.data.length === 0)
-    return <p className="px-6 py-12 text-center text-muted">Nothing needs your attention in this cluster right now.</p>
+  const active = <ActiveMutes cluster={cluster} mutes={mutes.data ?? []} />
+  if (problems.length === 0)
+    return (
+      <>
+        {active}
+        <p className="px-6 py-12 text-center text-muted">Nothing needs your attention in this cluster right now.</p>
+      </>
+    )
 
   return (
     <>
+      {active}
       <ul className="divide-y divide-line">
-        {q.data.map((p) => {
+        {problems.map((p) => {
           const t = target(p)
           return (
-            <li key={p.id} className="pb-0.5">
+            <li key={p.id} className={`pb-0.5 ${p.muted ? 'bg-sunken/30' : ''}`}>
               <button
                 onClick={() => setOpen(t)}
                 disabled={!t}
-                className="flex w-full items-start gap-3 px-5 py-3.5 text-left enabled:hover:bg-sunken/70"
+                className={`flex w-full items-start gap-3 px-5 py-3.5 text-left enabled:hover:bg-sunken/70 ${p.muted ? 'opacity-60' : ''}`}
               >
                 <span className="mt-0.5">{p.source === 'alertmanager' ? <BellRing size={18} className="text-bad" /> : severityIcon[p.severity]}</span>
                 <span className="min-w-0 flex-1">
@@ -107,6 +121,9 @@ export function ProblemsTab({ cluster }: { cluster: string }) {
                   <CrashReport crash={p.crash} pod={p.object.replace(/^pod\//, '')} />
                 </div>
               )}
+              <div className="-mt-1.5 px-5 pb-2.5 sm:pl-13">
+                {p.muted ? <MutedLine cluster={cluster} mute={p.muted} /> : <MuteControl cluster={cluster} problem={p} />}
+              </div>
             </li>
 
           )

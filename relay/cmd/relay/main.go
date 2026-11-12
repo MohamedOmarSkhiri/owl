@@ -68,6 +68,7 @@ type server struct {
 	dataDir    string    // where the history is saved; empty = memory only
 	persistent bool      // dataDir is on a real volume (the chart says false for an emptyDir)
 	notify     *Notifier // nil or without channels = notifications off
+	mutes      *Mutes    // silenced problems (mutes.go)
 }
 
 // --- agent API ---
@@ -107,9 +108,16 @@ func (s *server) postProblem(w http.ResponseWriter, r *http.Request) {
 			state = "RESOLVED"
 		}
 		// Push notification hook goes here in the push step.
-		log.Printf("problem %s %s %s/%s %s", state, p.Cluster, p.Namespace, p.Object, p.Reason)
-		s.notify.Problem(p) // filtered (severity, cooldown) and sent in the background
+		if m := s.mutes.For(p); m != nil {
+			log.Printf("problem %s %s %s/%s %s (muted by %s)", state, p.Cluster, p.Namespace, p.Object, p.Reason, m.ID)
+		} else {
+			log.Printf("problem %s %s %s/%s %s", state, p.Cluster, p.Namespace, p.Object, p.Reason)
+			s.notify.Problem(p) // filtered (severity, cooldown) and sent in the background
+		}
 
+	}
+	if p.Resolved {
+		s.mutes.Resolved(p) // after the check above: its "resolved" message stays muted too
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -117,7 +125,17 @@ func (s *server) postProblem(w http.ResponseWriter, r *http.Request) {
 // --- app API ---
 
 func (s *server) getClusters(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, s.store.Clusters())
+	clusters := s.store.Clusters()
+	// The count is what needs someone: muted problems are told apart. Health still sees them all.
+	for i, c := range clusters {
+		for _, p := range s.store.Problems(c.ID, true) {
+			if s.mutes.For(p) != nil {
+				clusters[i].ProblemsOpen--
+				clusters[i].ProblemsMuted++
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, clusters)
 }
 
 func (s *server) getProblems(w http.ResponseWriter, r *http.Request) {
@@ -127,7 +145,52 @@ func (s *server) getProblems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	openOnly := r.URL.Query().Get("open") != "false"
-	writeJSON(w, http.StatusOK, s.store.Problems(id, openOnly))
+	problems := s.store.Problems(id, openOnly)
+	for i := range problems {
+		problems[i].Muted = s.mutes.For(problems[i])
+	}
+	writeJSON(w, http.StatusOK, problems)
+}
+
+func (s *server) getMutes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, s.mutes.List(r.PathValue("id")))
+}
+
+func (s *server) postMute(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !s.store.ClusterExists(id) {
+		writeErr(w, http.StatusNotFound, "unknown cluster")
+		return
+	}
+	var req MuteRequest
+	if err := decode(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad mute: "+err.Error())
+		return
+	}
+	m, err := newMute(id, req, time.Now())
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.mutes.Add(m); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	log.Printf("mute %s added: %s %s/%s %s", m.ID, id, m.Namespace, m.Object, m.Reason)
+	writeJSON(w, http.StatusCreated, m)
+}
+
+func (s *server) deleteMute(w http.ResponseWriter, r *http.Request) {
+	ok, err := s.mutes.Remove(r.PathValue("id"), r.PathValue("muteId"))
+	switch {
+	case !ok:
+		writeErr(w, http.StatusNotFound, "no such mute")
+	case err != nil:
+		writeErr(w, http.StatusInternalServerError, "removed, but not saved: "+err.Error())
+	default:
+		log.Printf("mute %s removed", r.PathValue("muteId"))
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 // --- agent request channel (long-poll) ---
@@ -263,7 +326,7 @@ func main() {
 		log.Fatal("set RELAY_AGENT_TOKEN and RELAY_APP_TOKEN (e.g. export RELAY_APP_TOKEN=$(openssl rand -hex 16))")
 	}
 
-	s := &server{store: NewStore(), broker: NewBroker(), dataDir: *dataDir, notify: notifierFromEnv()}
+	s := &server{store: NewStore(), broker: NewBroker(), dataDir: *dataDir, notify: notifierFromEnv(), mutes: NewMutes(*dataDir)}
 	s.persistent = s.dataDir != "" && os.Getenv("RELAY_PERSISTENT") != "false"
 	if s.dataDir != "" {
 		if err := CheckWritable(s.dataDir); err != nil {
@@ -274,6 +337,11 @@ func main() {
 			log.Fatalf("history: %v (move the file away to start with an empty history)", err)
 		}
 		log.Printf("history: %d clusters loaded from %s, saved every minute", n, s.dataDir)
+		if n, err := s.mutes.Load(); err != nil {
+			log.Fatalf("mutes: %v (move the file away to start without mutes)", err)
+		} else if n > 0 {
+			log.Printf("mutes: %d loaded", n)
+		}
 		go func() {
 			for range time.Tick(time.Minute) {
 				if err := s.store.SaveHistory(s.dataDir); err != nil {
@@ -302,6 +370,9 @@ func main() {
 	mux.HandleFunc("GET /v1/clusters", requireToken(appToken, s.getClusters))
 	mux.HandleFunc("GET /v1/clusters/{id}/problems", requireToken(appToken, s.getProblems))
 	mux.HandleFunc("GET /v1/clusters/{id}/history", requireToken(appToken, s.getHistory))
+	mux.HandleFunc("GET /v1/clusters/{id}/mutes", requireToken(appToken, s.getMutes))
+	mux.HandleFunc("POST /v1/clusters/{id}/mutes", requireToken(appToken, s.postMute))
+	mux.HandleFunc("DELETE /v1/clusters/{id}/mutes/{muteId}", requireToken(appToken, s.deleteMute))
 	mux.HandleFunc("GET /v1/info", requireToken(appToken, s.getInfo))
 	mux.HandleFunc("GET /v1/notifications", requireToken(appToken, s.getNotifications))
 	mux.HandleFunc("POST /v1/notifications/test", requireToken(appToken, s.testNotifications))

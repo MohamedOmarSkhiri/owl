@@ -15,7 +15,8 @@ export interface Cluster {
   lastSeen: string
   // From relay 0.6.0 (missing on older relays, hence optional):
   podsCompleted?: number // finished Jobs: neither running nor failing
-  problemsOpen?: number
+  problemsOpen?: number // from 0.12.0, without the muted ones
+  problemsMuted?: number
   usage?: UsageTotals // whole-cluster CPU and memory; missing without metrics-server
 }
 
@@ -32,6 +33,29 @@ export interface Problem {
   lastSeen: string
   resolved: boolean
   crash?: Crash // CrashLoopBackOff and OOMKilled
+  muted?: Mute // from relay 0.12.0: the mute that silences it
+}
+
+/** Silences notifications for matching problems; empty fields match anything. */
+export interface Mute {
+  id: string
+  cluster: string
+  namespace?: string
+  object?: string
+  reason?: string
+  until?: string // absent with untilResolved
+  untilResolved?: boolean
+  note?: string
+  created: string
+}
+
+export interface MuteRequest {
+  namespace?: string
+  object?: string
+  reason?: string
+  for?: string // Go duration: "1h", "24h", "168h"
+  untilResolved?: boolean
+  note?: string
 }
 
 /** How a container's last run ended, read by the agent when it crashed. */
@@ -126,6 +150,7 @@ async function get<T>(
   query?: Record<string, string | undefined>,
   method = 'GET',
   signal?: AbortSignal, // lets the live map stop a waiting request when you leave it
+  body?: unknown,
 ): Promise<T> {
   const params = new URLSearchParams()
   for (const [k, v] of Object.entries(query ?? {})) if (v) params.set(k, v)
@@ -136,7 +161,12 @@ async function get<T>(
     res = await fetch(url, {
       method,
       signal,
-      headers: { Accept: 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      headers: {
+        Accept: 'application/json',
+        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
     })
   } catch {
     throw new ApiError(0, 'Cannot reach the Owl relay. Check your connection.')
@@ -152,6 +182,7 @@ async function get<T>(
     if (res.status === 401) msg = 'This token was rejected by the relay.'
     throw new ApiError(res.status, msg)
   }
+  if (res.status === 204) return undefined as T
   return res.json() as Promise<T>
 }
 
@@ -161,6 +192,10 @@ const kindQuery = (k: ResourceKind) => ({ group: k.group, version: k.version, re
 export const api = {
   clusters: () => get<Cluster[]>('/v1/clusters'),
   problems: (id: string) => get<Problem[]>(`/v1/clusters/${c(id)}/problems`),
+  mutes: (id: string) => get<Mute[]>(`/v1/clusters/${c(id)}/mutes`),
+  mute: (id: string, m: MuteRequest) => get<Mute>(`/v1/clusters/${c(id)}/mutes`, undefined, 'POST', undefined, m),
+  unmute: (id: string, muteId: string) =>
+    get<void>(`/v1/clusters/${c(id)}/mutes/${c(muteId)}`, undefined, 'DELETE'),
   kinds: (id: string) => get<ResourceKind[]>(`/v1/clusters/${c(id)}/kinds`),
   list: (id: string, kind: ResourceKind, namespace?: string) =>
     get<ResourceItem[]>(`/v1/clusters/${c(id)}/resources`, { ...kindQuery(kind), namespace }),
