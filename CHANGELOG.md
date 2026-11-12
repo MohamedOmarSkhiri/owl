@@ -4,6 +4,25 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.10.2] - 2026-11-12
+
+### Fixed
+
+- The map is live for real: the relay now forwards the app's `since` to the agent, so the agent holds the request until something changes. In 0.10.1 the relay dropped it and the map fell back to asking again.
+- A crash loop stays one open problem while the container shows "Error" between restarts, instead of closing and opening again at each restart. The problem shows the run that just crashed: its exit code, reason and last log lines.
+
+## [0.10.1] - 2026-11-04
+
+### Changed
+
+- The map is live: it updates about a second after a pod, workload or Service in the namespace changes (the agent holds each request until something changes, instead of the app asking every 15 seconds). The toolbar shows "Live · updated N s ago".
+- Pods, ReplicaSets and Jobs show the end of their name on the map, the part that changes when a pod is replaced; the full name is in the tooltip.
+- Terminating pods are amber on the map.
+
+### Fixed
+
+- Warning events show when they happened, not when the agent saw them: after a restart of the agent or the node, they no longer all say "2m ago".
+
 ## [0.10.0] - 2026-11-02
 
 ### Added
