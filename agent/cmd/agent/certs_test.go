@@ -142,27 +142,63 @@ func TestProbeReadsTheServedCertificate(t *testing.T) {
 		{namespace: "shop", object: "ingress/b", what: "https://other.test", addr: addr, sni: "other.test", checkHost: "other.test"},
 		{namespace: "shop", object: "ingress/c", what: "https://down.test", addr: "127.0.0.1:1", sni: "down.test"},
 	}, unknown)
-	if len(found) != 1 || found[0].object != "ingress/a" || found[0].notAfter.IsZero() {
-		t.Fatalf("found = %+v (the default certificate of another host must be ignored)", found)
+	if len(found) != 3 || found[0].notAfter.IsZero() ||
+		!found[1].otherName || !found[1].notAfter.IsZero() ||
+		found[2].unreachable == "" || !found[2].notAfter.IsZero() {
+		t.Fatalf("found = %+v (the default certificate of another host must not count)", found)
 	}
 	if !unknown["shop|ingress/c"] || unknown["shop|ingress/b"] {
 		t.Fatalf("unknown = %v: only the unreachable host is unknown", unknown)
 	}
 }
 
-func TestProbeKeepsTheFirstToExpirePerObject(t *testing.T) {
-	soon, later := time.Now().Add(24*time.Hour), time.Now().Add(90*24*time.Hour)
-	w := &certWatcher{dial: func(_ context.Context, addr, _ string) (*x509.Certificate, error) {
-		if addr == "a:443" {
-			return &x509.Certificate{NotAfter: later}, nil
-		}
-		return &x509.Certificate{NotAfter: soon}, nil
-	}}
-	found := w.probe(context.Background(), []probeTarget{
-		{object: "httproute/r", addr: "a:443"}, {object: "httproute/r", addr: "b:443"},
-	}, map[string]bool{})
-	if len(found) != 1 || !found[0].notAfter.Equal(soon) {
-		t.Fatalf("found = %+v", found)
+func TestOneProblemPerObjectTheFirstToExpire(t *testing.T) {
+	now := time.Now()
+	h := func(host string, d time.Duration) certFound {
+		return certFound{namespace: "shop", object: "httproute/r", what: "https://" + host,
+			notAfter: now.Add(d), warn: certWarn, critical: certCritical}
+	}
+	ps := certProblems([]certFound{h("a.test", 10*24*time.Hour), h("b.test", 2*24*time.Hour), h("c.test", 90*24*time.Hour),
+		{namespace: "shop", object: "httproute/r", what: "https://d.test", unreachable: "no such host"}}, now)
+	if len(ps) != 1 || ps[0].Severity != "critical" || !strings.HasPrefix(ps[0].Message, "https://b.test: ") {
+		t.Fatalf("problems = %+v", ps)
+	}
+}
+
+func TestCertReport(t *testing.T) {
+	now := time.Now()
+	w := &certWatcher{}
+	if r := w.report(now); !r.Checked.IsZero() || r.Items == nil || len(r.Items) != 0 {
+		t.Fatalf("before the first check: %+v", r)
+	}
+	w.last = []certFound{
+		{object: "cluster/apiserver", what: "API server", kind: "apiserver", notAfter: now.Add(300 * 24 * time.Hour), warn: certWarn, critical: certCritical},
+		{namespace: "demo", object: "httproute/my", what: "https://myapp.local", kind: "host", unreachable: "lookup myapp.local: no such host"},
+		{namespace: "shop", object: "ingress/web", what: "https://shop", kind: "host", notAfter: now.Add(5 * 24 * time.Hour), warn: certWarn, critical: certCritical},
+		{namespace: "shop", object: "certificate/api", what: "certificate api", kind: "cert-manager", notAfter: now.Add(24 * time.Hour), warn: certWarn, critical: certCritical, notReady: "Failed: order failed"},
+		{namespace: "x", object: "ingress/d", what: "https://d", kind: "host", otherName: true},
+	}
+	w.checked = now
+	r := w.report(now)
+	got := []string{}
+	for _, it := range r.Items {
+		got = append(got, it.What+"="+it.Status)
+	}
+	want := "certificate api=notReady,https://shop=warning,API server=ok,https://d=otherName,https://myapp.local=unreachable"
+	if strings.Join(got, ",") != want {
+		t.Fatalf("report = %s\nwant     %s", strings.Join(got, ","), want)
+	}
+	if r.Items[4].Detail != "lookup myapp.local: no such host" || r.Items[4].NotAfter != nil || r.Every != "10m0s" {
+		t.Fatalf("item = %+v", r.Items[4])
+	}
+}
+
+func TestShortErr(t *testing.T) {
+	if got := shortErr(errors.New("dial tcp: lookup myapp.local on 127.0.0.53:53: no such host")); got != "lookup myapp.local on 127.0.0.53:53: no such host" {
+		t.Fatal(got)
+	}
+	if got := shortErr(errors.New("dial tcp 10.0.0.1:443: i/o timeout")); got != "10.0.0.1:443: i/o timeout" {
+		t.Fatal(got)
 	}
 }
 

@@ -70,17 +70,18 @@ type requestHandler struct {
 	pods    listerscorev1.PodLister  // informer caches: requests, limits, owners, node placement
 	nodes   listerscorev1.NodeLister // without extra API calls
 	changes *nsChanges               // per-namespace change counter, for the live map (changes.go)
+	certs   *certWatcher             // the last certificate check (certs.go)
 }
 
 // serveRequests long-polls the relay and answers each request in its own goroutine.
 func serveRequests(ctx context.Context, cfg *rest.Config, cs kubernetes.Interface,
-	pods listerscorev1.PodLister, nodes listerscorev1.NodeLister, changes *nsChanges, relay *relayClient, cluster string) {
+	pods listerscorev1.PodLister, nodes listerscorev1.NodeLister, changes *nsChanges, certs *certWatcher, relay *relayClient, cluster string) {
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		log.Printf("live requests disabled: %v", err)
 		return
 	}
-	h := &requestHandler{cs: cs, dyn: dyn, pods: pods, nodes: nodes, changes: changes}
+	h := &requestHandler{cs: cs, dyn: dyn, pods: pods, nodes: nodes, changes: changes, certs: certs}
 	poll := &http.Client{Timeout: 40 * time.Second} // relay holds a poll up to 25s
 	pollURL := relay.base + "/v1/agent/requests?cluster=" + url.QueryEscape(cluster)
 
@@ -159,6 +160,12 @@ func (h *requestHandler) handle(parent context.Context, req *agentRequest) agent
 		out, err = h.usage(ctx, p)
 	case "map":
 		out, err = h.resourceMap(ctx, p)
+	case "certs":
+		if h.certs == nil {
+			err = errors.New("certificates are not checked by this agent")
+		} else {
+			out = h.certs.report(time.Now())
+		}
 	default:
 		return agentResponse{Status: http.StatusBadRequest, Error: "unknown request kind " + req.Kind}
 	}

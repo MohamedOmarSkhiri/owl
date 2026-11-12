@@ -59,39 +59,54 @@ var (
 	httpRoutesGVR   = schema.GroupVersionResource{Group: "gateway.networking.k8s.io", Version: "v1", Resource: "httproutes"}
 )
 
-// certFound is one certificate the agent looked at.
+// certFound is one certificate the agent looked at (one per host: an Ingress can have several).
 type certFound struct {
 	namespace, object string // what the problem is about: certificate/x, ingress/x, node/x…
 	what              string // where it was found, for the message: "https://shop.example.com"
+	kind              string // cert-manager | host | apiserver | kubelet | kubeconfig | service
 	notAfter          time.Time
 	warn, critical    time.Duration
 	notReady          string // cert-manager: why it is not Ready (empty = Ready or unknown)
+	unreachable       string // the host did not answer: why (no expiry known)
+	otherName         bool   // the host serves a certificate for another name (a default one)
 }
 
-// certProblems turns what was found into problems: expiring soon, expired, or not Ready.
+// certProblems turns what was found into problems: not Ready, expiring soon or expired.
+// One CertificateExpiring per object: the host that expires first.
 func certProblems(found []certFound, now time.Time) []Problem {
 	var out []Problem
+	first := map[string]certFound{}
+	var keys []string
 	for _, c := range found {
-		base := Problem{Source: "certificate", Namespace: c.namespace, Object: c.object}
 		if c.notReady != "" {
-			p := base
-			p.Severity, p.Reason, p.Message = "critical", "CertificateNotReady", c.notReady
-			out = append(out, p)
+			out = append(out, Problem{Source: "certificate", Severity: "critical", Namespace: c.namespace,
+				Object: c.object, Reason: "CertificateNotReady", Message: c.notReady})
 		}
 		if c.notAfter.IsZero() {
 			continue
 		}
+		k := c.namespace + "|" + c.object
+		cur, ok := first[k]
+		if !ok {
+			keys = append(keys, k)
+		}
+		if !ok || c.notAfter.Before(cur.notAfter) {
+			first[k] = c
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		c := first[k]
 		left := c.notAfter.Sub(now)
 		if left > c.warn {
 			continue
 		}
-		p := base
-		p.Severity, p.Reason = "warning", "CertificateExpiring"
+		sev := "warning"
 		if left <= c.critical {
-			p.Severity = "critical"
+			sev = "critical"
 		}
-		p.Message = c.what + ": " + expiresIn(c.notAfter, now)
-		out = append(out, p)
+		out = append(out, Problem{Source: "certificate", Severity: sev, Namespace: c.namespace, Object: c.object,
+			Reason: "CertificateExpiring", Message: c.what + ": " + expiresIn(c.notAfter, now)})
 	}
 	return out
 }
@@ -141,6 +156,7 @@ func dialCert(ctx context.Context, addr, sni string) (*x509.Certificate, error) 
 // probeTarget is one TLS endpoint to read: an Ingress or HTTPRoute host, a kubelet, a Service.
 type probeTarget struct {
 	namespace, object, what string
+	kind                    string
 	addr, sni               string
 	checkHost               string // the certificate must cover this name, else it is not this host's
 }
@@ -153,6 +169,10 @@ type certWatcher struct {
 	extra  []probeTarget // AGENT_TLS_PROBES
 	dial   tlsDial
 	logged sync.Map // what was already logged once (forbidden, missing CRD)
+
+	mu      sync.Mutex
+	last    []certFound // the last check, for the app's Certificates view
+	checked time.Time
 }
 
 func newCertWatcher(cs kubernetes.Interface, dyn dynamic.Interface, cfg *rest.Config, nodes listerscorev1.NodeLister) *certWatcher {
@@ -173,7 +193,7 @@ func parseProbes(v string) []probeTarget {
 			continue
 		}
 		out = append(out, probeTarget{
-			namespace: ns, object: "service/" + svc, what: "https://" + svc + ":" + port,
+			namespace: ns, object: "service/" + svc, what: "https://" + svc + ":" + port, kind: "service",
 			addr: net.JoinHostPort(svc+"."+ns+".svc", port),
 		})
 	}
@@ -251,7 +271,7 @@ func (w *certWatcher) certManager(ctx context.Context, now time.Time, managed ma
 
 func cmCertificate(it unstructured.Unstructured, now time.Time, managed map[string]bool) certFound {
 	c := certFound{
-		namespace: it.GetNamespace(), object: "certificate/" + it.GetName(),
+		namespace: it.GetNamespace(), object: "certificate/" + it.GetName(), kind: "cert-manager",
 		what: "certificate " + it.GetName(), warn: certWarn, critical: certCritical,
 	}
 	if s, _, _ := unstructured.NestedString(it.Object, "spec", "secretName"); s != "" {
@@ -340,7 +360,7 @@ func hostTarget(ns, object, host string, managed map[string]bool) (probeTarget, 
 	if host == "" || strings.Contains(host, "*") || managed[host] {
 		return probeTarget{}, false
 	}
-	return probeTarget{namespace: ns, object: object, what: "https://" + host,
+	return probeTarget{namespace: ns, object: object, what: "https://" + host, kind: "host",
 		addr: net.JoinHostPort(host, "443"), sni: host, checkHost: host}, true
 }
 
@@ -359,7 +379,7 @@ func (w *certWatcher) kubeletTargets() []probeTarget {
 		if ip == "" || port == 0 {
 			continue
 		}
-		out = append(out, probeTarget{object: "node/" + n.Name, what: "kubelet on " + n.Name,
+		out = append(out, probeTarget{object: "node/" + n.Name, what: "kubelet on " + n.Name, kind: "kubelet",
 			addr: net.JoinHostPort(ip, strconv.Itoa(port))})
 	}
 	return out
@@ -374,58 +394,52 @@ func nodeIP(n *corev1.Node) string {
 	return ""
 }
 
-// probe reads the targets in parallel. One problem per object: the host that expires first.
+// probe reads the targets in parallel: one entry per target, in the targets' order.
+// An unreachable target makes its object unknown: its open problems stay as they are.
 func (w *certWatcher) probe(ctx context.Context, targets []probeTarget, unknown map[string]bool) []certFound {
-	type result struct {
-		t    probeTarget
-		cert *x509.Certificate
-	}
+	out := make([]certFound, len(targets))
 	var (
-		mu      sync.Mutex
-		results []result
-		wg      sync.WaitGroup
-		sem     = make(chan struct{}, certProbeWorkers)
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		sem = make(chan struct{}, certProbeWorkers)
 	)
-	for _, t := range targets {
+	for i, t := range targets {
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(t probeTarget) {
+		go func(i int, t probeTarget) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			c := certFound{namespace: t.namespace, object: t.object, what: t.what, kind: t.kind, warn: certWarn, critical: certCritical}
 			cert, err := w.dial(ctx, t.addr, t.sni)
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
+			switch {
+			case err != nil:
+				c.unreachable = shortErr(err)
+				mu.Lock()
 				unknown[t.namespace+"|"+t.object] = true // unreachable from here: say nothing
-				return
+				mu.Unlock()
+			case t.checkHost != "" && cert.VerifyHostname(t.checkHost) != nil:
+				c.otherName = true // a default certificate, not this host's: its expiry says nothing
+			default:
+				c.notAfter = cert.NotAfter
 			}
-			if t.checkHost != "" && cert.VerifyHostname(t.checkHost) != nil {
-				return // a default certificate, not this host's: its expiry says nothing about it
-			}
-			results = append(results, result{t, cert})
-		}(t)
+			out[i] = c
+		}(i, t)
 	}
 	wg.Wait()
-
-	first := map[string]result{}
-	for _, r := range results {
-		k := r.t.namespace + "|" + r.t.object
-		if cur, ok := first[k]; !ok || r.cert.NotAfter.Before(cur.cert.NotAfter) {
-			first[k] = r
-		}
-	}
-	keys := make([]string, 0, len(first))
-	for k := range first {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var out []certFound
-	for _, k := range keys {
-		r := first[k]
-		out = append(out, certFound{namespace: r.t.namespace, object: r.t.object, what: r.t.what,
-			notAfter: r.cert.NotAfter, warn: certWarn, critical: certCritical})
-	}
 	return out
+}
+
+// shortErr: "dial tcp: lookup myapp.local: no such host" -> "lookup myapp.local: no such host".
+func shortErr(err error) string {
+	s := err.Error()
+	if i := strings.LastIndex(s, ": dial tcp "); i >= 0 {
+		s = s[i+2:]
+	}
+	s = strings.TrimPrefix(strings.TrimPrefix(s, "dial tcp: "), "dial tcp ")
+	if len(s) > 120 {
+		s = s[:120] + "…"
+	}
+	return s
 }
 
 // apiServer reads the certificate of the API server the agent talks to.
@@ -449,7 +463,7 @@ func (w *certWatcher) apiServer(ctx context.Context) *certFound {
 	if err != nil {
 		return nil
 	}
-	return &certFound{object: "cluster/apiserver", what: "API server " + u.Host,
+	return &certFound{object: "cluster/apiserver", what: "API server " + u.Host, kind: "apiserver",
 		notAfter: cert.NotAfter, warn: certWarn, critical: certCritical}
 }
 
@@ -466,7 +480,8 @@ func (w *certWatcher) clientCert() *certFound {
 	if cert == nil {
 		return nil // a token, or in-cluster: nothing expires here
 	}
-	return &certFound{object: "cluster/kubeconfig", what: "the client certificate Owl's agent signs in with (" + cert.Subject.CommonName + ")",
+	return &certFound{object: "cluster/kubeconfig", kind: "kubeconfig",
+		what: "Kubeconfig client certificate (" + cert.Subject.CommonName + ")",
 		notAfter: cert.NotAfter, warn: clientCertWarn, critical: clientCertCrit}
 }
 
@@ -504,6 +519,9 @@ func (w *certWatcher) run(ctx context.Context, tr *tracker) {
 	for first := true; ; first = false {
 		found, unknown := w.check(ctx, time.Now())
 		evaluateCerts(tr, found, unknown, time.Now())
+		w.mu.Lock()
+		w.last, w.checked = found, time.Now().UTC()
+		w.mu.Unlock()
 		if first {
 			hosts := 0
 			for k := range unknown {
@@ -529,11 +547,69 @@ func certSummary(found []certFound, unreachable int) string {
 			next = &found[i]
 		}
 	}
-	msg := fmt.Sprintf("certificates: %d watched, %d not reachable from here", len(found), unreachable)
+	msg := fmt.Sprintf("certificates: %d checked, %d not reachable from here", len(found), unreachable)
 	if next != nil {
 		msg += "; first to expire: " + next.what + ", " + expiresIn(next.notAfter, time.Now())
 	}
 	return msg + "; checked every " + certEvery.String()
+}
+
+// CertReport answers the app's Certificates view: the last check, first to expire on top.
+type CertReport struct {
+	Checked time.Time  `json:"checked,omitzero"` // zero: the first check is still running
+	Every   string     `json:"every"`
+	Items   []CertItem `json:"items"`
+}
+
+type CertItem struct {
+	Namespace string     `json:"namespace,omitempty"`
+	Object    string     `json:"object"`
+	What      string     `json:"what"`
+	Kind      string     `json:"kind"`
+	NotAfter  *time.Time `json:"notAfter,omitempty"`
+	Status    string     `json:"status"`           // ok | warning | critical | notReady | unreachable | otherName
+	Detail    string     `json:"detail,omitempty"` // why not ready, why unreachable
+}
+
+func (w *certWatcher) report(now time.Time) CertReport {
+	w.mu.Lock()
+	found, checked := w.last, w.checked
+	w.mu.Unlock()
+	r := CertReport{Checked: checked, Every: certEvery.String(), Items: []CertItem{}}
+	for _, c := range found {
+		it := CertItem{Namespace: c.namespace, Object: c.object, What: c.what, Kind: c.kind, Status: "ok"}
+		if !c.notAfter.IsZero() {
+			t := c.notAfter.UTC()
+			it.NotAfter = &t
+			switch left := c.notAfter.Sub(now); {
+			case left <= c.critical:
+				it.Status = "critical"
+			case left <= c.warn:
+				it.Status = "warning"
+			}
+		}
+		switch {
+		case c.notReady != "":
+			it.Status, it.Detail = "notReady", c.notReady
+		case c.unreachable != "":
+			it.Status, it.Detail = "unreachable", c.unreachable
+		case c.otherName:
+			it.Status, it.Detail = "otherName", "serves a certificate for another name (a default one): not checked"
+		}
+		r.Items = append(r.Items, it)
+	}
+	// Known expiry first, soonest on top; then the ones without one.
+	sort.SliceStable(r.Items, func(i, j int) bool {
+		a, b := r.Items[i].NotAfter, r.Items[j].NotAfter
+		switch {
+		case a != nil && b != nil:
+			return a.Before(*b)
+		case a != nil || b != nil:
+			return a != nil
+		}
+		return r.Items[i].What < r.Items[j].What
+	})
+	return r
 }
 
 func errKind(err error) string {

@@ -16,6 +16,7 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
   - Owl's own HTTPS certificate (the chart points the local agent at it when `tls.enabled`).
 
   No Secret is read. Wildcard hosts are not checked: they have no single address to call. The agent logs what it watches after the first check.
+- Certificates view, next to Usage: every certificate the agent watches, first to expire on top, with its expiry date, time left and status (OK, expires soon, expiring, not ready, not reachable from the cluster with the reason, or not checked when a host serves another name's certificate). Click one to open its object. API: `GET /v1/clusters/{id}/certificates`.
 - Certificate, Ingress and HTTPRoute problems open the object's YAML.
 
 ## [0.12.0] - 2026-11-12

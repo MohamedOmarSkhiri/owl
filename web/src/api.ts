@@ -58,6 +58,23 @@ export interface MuteRequest {
   note?: string
 }
 
+/** The agent's last certificate check (every 10 minutes), first to expire on top. */
+export interface CertReport {
+  checked?: string // absent: the first check is still running
+  every: string
+  items: CertItem[]
+}
+
+export interface CertItem {
+  namespace?: string
+  object: string // certificate/x, ingress/x, httproute/x, node/x, service/x, cluster/apiserver, cluster/kubeconfig
+  what: string
+  kind: 'cert-manager' | 'host' | 'apiserver' | 'kubelet' | 'kubeconfig' | 'service'
+  notAfter?: string
+  status: 'ok' | 'warning' | 'critical' | 'notReady' | 'unreachable' | 'otherName'
+  detail?: string
+}
+
 /** How a container's last run ended, read by the agent when it crashed. */
 export interface Crash {
   container: string
@@ -195,6 +212,7 @@ const kindQuery = (k: ResourceKind) => ({ group: k.group, version: k.version, re
 export const api = {
   clusters: () => get<Cluster[]>('/v1/clusters'),
   problems: (id: string) => get<Problem[]>(`/v1/clusters/${c(id)}/problems`),
+  certificates: (id: string) => get<CertReport>(`/v1/clusters/${c(id)}/certificates`),
   mutes: (id: string) => get<Mute[]>(`/v1/clusters/${c(id)}/mutes`),
   mute: (id: string, m: MuteRequest) => get<Mute>(`/v1/clusters/${c(id)}/mutes`, undefined, 'POST', undefined, m),
   unmute: (id: string, muteId: string) =>
