@@ -481,7 +481,7 @@ func (w *certWatcher) clientCert() *certFound {
 		return nil // a token, or in-cluster: nothing expires here
 	}
 	return &certFound{object: "cluster/kubeconfig", kind: "kubeconfig",
-		what: "Kubeconfig client certificate (" + cert.Subject.CommonName + ")",
+		what:     "Kubeconfig client certificate (" + cert.Subject.CommonName + ")",
 		notAfter: cert.NotAfter, warn: clientCertWarn, critical: clientCertCrit}
 }
 
