@@ -76,7 +76,7 @@ jobs:
           cache-from: type=gha,scope=agent
           cache-to: type=gha,scope=agent,mode=max
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - name: Package and push the chart
         env:
