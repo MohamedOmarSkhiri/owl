@@ -412,7 +412,7 @@ func main() {
 		AddFunc:    onEvent,
 		UpdateFunc: func(_, o any) { onEvent(o) },
 	})
-	nodeInf.Informer() // register so the factory starts it
+	nodeInf.Informer()                // register so the factory starts it
 	rules := newClusterRules(factory) // nodes, workloads, Jobs, volumes (cluster.go)
 
 	factory.Start(ctx.Done())
