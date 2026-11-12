@@ -23,7 +23,7 @@ export interface Cluster {
 export interface Problem {
   id: string
   cluster: string
-  source: 'pod' | 'event' | 'alertmanager' | 'node' | 'workload' | 'storage'
+  source: 'pod' | 'event' | 'alertmanager' | 'node' | 'workload' | 'storage' | 'certificate'
   severity: 'critical' | 'warning'
   namespace: string
   object: string
@@ -56,6 +56,23 @@ export interface MuteRequest {
   for?: string // Go duration: "1h", "24h", "168h"
   untilResolved?: boolean
   note?: string
+}
+
+/** The agent's last certificate check (every 10 minutes), first to expire on top. */
+export interface CertReport {
+  checked?: string // absent: the first check is still running
+  every: string
+  items: CertItem[]
+}
+
+export interface CertItem {
+  namespace?: string
+  object: string // certificate/x, ingress/x, httproute/x, node/x, service/x, cluster/apiserver, cluster/kubeconfig
+  what: string
+  kind: 'cert-manager' | 'host' | 'apiserver' | 'kubelet' | 'kubeconfig' | 'service'
+  notAfter?: string
+  status: 'ok' | 'warning' | 'critical' | 'notReady' | 'unreachable' | 'otherName'
+  detail?: string
 }
 
 /** How a container's last run ended, read by the agent when it crashed. */
@@ -104,6 +121,9 @@ export const PROBLEM_KINDS: Record<string, ResourceKind> = {
   cronjob: k('batch', 'cronjobs', 'CronJob'),
   persistentvolumeclaim: k('', 'persistentvolumeclaims', 'PersistentVolumeClaim'),
   service: k('', 'services', 'Service'),
+  ingress: k('networking.k8s.io', 'ingresses', 'Ingress'),
+  httproute: k('gateway.networking.k8s.io', 'httproutes', 'HTTPRoute'),
+  certificate: k('cert-manager.io', 'certificates', 'Certificate'),
 }
 
 export const NAMESPACES: ResourceKind = {
@@ -192,6 +212,7 @@ const kindQuery = (k: ResourceKind) => ({ group: k.group, version: k.version, re
 export const api = {
   clusters: () => get<Cluster[]>('/v1/clusters'),
   problems: (id: string) => get<Problem[]>(`/v1/clusters/${c(id)}/problems`),
+  certificates: (id: string) => get<CertReport>(`/v1/clusters/${c(id)}/certificates`),
   mutes: (id: string) => get<Mute[]>(`/v1/clusters/${c(id)}/mutes`),
   mute: (id: string, m: MuteRequest) => get<Mute>(`/v1/clusters/${c(id)}/mutes`, undefined, 'POST', undefined, m),
   unmute: (id: string, muteId: string) =>

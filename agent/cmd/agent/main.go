@@ -37,7 +37,7 @@ import (
 
 type Problem struct {
 	Cluster   string    `json:"cluster"`
-	Source    string    `json:"source"`   // pod | event | node | workload | storage
+	Source    string    `json:"source"`   // pod | event | node | workload | storage | certificate
 	Severity  string    `json:"severity"` // critical | warning
 	Namespace string    `json:"namespace"`
 	Object    string    `json:"object"`
@@ -424,15 +424,19 @@ func main() {
 	log.Print("caches synced, reporting")
 	rules.evaluate(tr, time.Now())
 
-	// Answer live requests from the app (resource browser, pod logs) via the relay.
-	go serveRequests(ctx, cfg, client, podInf.Lister(), nodeInf.Lister(), changes, relay, *clusterName)
-
 	podLister := podInf.Lister()
 	nodeLister := nodeInf.Lister()
 	dyn, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		log.Fatalf("dynamic client: %v", err)
 	}
+	// Certificates that expire: the apps', the cluster's and Owl's own (certs.go), every 10 min.
+	certs := newCertWatcher(client, dyn, cfg, nodeLister)
+	go certs.run(ctx, tr)
+
+	// Answer live requests from the app (resource browser, pod logs) via the relay.
+	go serveRequests(ctx, cfg, client, podLister, nodeLister, changes, certs, relay, *clusterName)
+
 	// Reads cluster CPU and memory for each snapshot; the relay keeps them as history.
 	meter := &requestHandler{cs: client, dyn: dyn, pods: podLister, nodes: nodeLister}
 	sendSnapshot := func() {

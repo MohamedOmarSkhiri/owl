@@ -102,6 +102,10 @@ spec:
             - {name: AGENT_RELAY, value: "http://{{ include "owl.relay.name" $ }}:2300"}
             - name: AGENT_TOKEN
               valueFrom: {secretKeyRef: {name: {{ include "owl.tokens.name" $ }}, key: agent-token}}
+            {{- if and $local $.Values.tls.enabled }}
+            # Owl's own HTTPS certificate: reported like any other when it gets close to expiry.
+            - {name: AGENT_TLS_PROBES, value: "{{ $.Release.Namespace }}/{{ include "owl.relay.name" $ }}:{{ $.Values.service.httpsPort }}"}
+            {{- end }}
             {{- if not $local }}
             - {name: KUBECONFIG, value: /kube/config}
             {{- end }}

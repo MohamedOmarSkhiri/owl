@@ -16,6 +16,7 @@ export const SECTIONS = [
   { key: 'map', label: 'Map', count: undefined },
   { key: 'explore', label: 'Explore', count: undefined },
   { key: 'usage', label: 'Usage', count: undefined },
+  { key: 'certificates', label: 'Certificates', count: undefined },
 ] as const
 
 const REPO = 'https://github.com/MohamedOmarSkhiri/owl'

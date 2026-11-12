@@ -10,9 +10,17 @@ import { ErrorNote, inputClass, Loading, Panel } from './ui'
 
 const REFRESH = 15_000
 
-type Open = { kind: ResourceKind; namespace?: string; name: string } | null
+export type Open = { kind: ResourceKind; namespace?: string; name: string } | null
 
-function OpenPanel({ cluster, open, onClose }: { cluster: string; open: Open; onClose: () => void }) {
+/** The object a problem or certificate names ("ingress/web"): a pod opens with its logs, the others as YAML. */
+export function objectTarget(namespace: string | undefined, object: string): Open {
+  const [type, ...rest] = object.split('/')
+  const kind = type === 'pod' ? PODS : PROBLEM_KINDS[type]
+  if (!kind || rest.length === 0) return null
+  return { kind, namespace: kind.namespaced ? namespace : undefined, name: rest.join('/') }
+}
+
+export function OpenPanel({ cluster, open, onClose }: { cluster: string; open: Open; onClose: () => void }) {
   if (!open) return null
   return sameKind(open.kind, PODS) ? (
     <PodPanel cluster={cluster} namespace={open.namespace ?? ''} name={open.name} onClose={onClose} />
@@ -70,13 +78,7 @@ export function ProblemsTab({ cluster }: { cluster: string }) {
     [q.data],
   )
 
-  // The object a problem is about: a pod opens with its logs, the others as YAML.
-  const target = (p: Problem): Open => {
-    const [type, ...rest] = p.object.split('/')
-    const kind = type === 'pod' ? PODS : PROBLEM_KINDS[type]
-    if (!kind || rest.length === 0) return null
-    return { kind, namespace: kind.namespaced ? p.namespace : undefined, name: rest.join('/') }
-  }
+  const target = (p: Problem) => objectTarget(p.namespace, p.object)
 
   if (q.isPending) return <Loading />
   if (q.isError) return <ErrorNote error={q.error} onRetry={() => q.refetch()} />

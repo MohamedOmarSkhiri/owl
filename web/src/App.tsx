@@ -5,6 +5,7 @@ import { api, getToken, percent, setToken, timeAgo, type Cluster } from './api'
 import { ErrorNote, healthText, Loading, Pulse } from './components/ui'
 import { ExploreTab, PodsTab, ProblemsTab } from './components/tabs'
 import { UsageTab } from './components/usage'
+import { CertificatesTab } from './components/certificates'
 import { OverviewTab } from './components/overview'
 import { SECTIONS, Sidebar } from './components/sidebar'
 import { SignIn } from './components/signin'
@@ -142,6 +143,8 @@ function ClusterView({ clusters }: { clusters: Cluster[] }) {
           <ExploreTab key={cluster.id} cluster={cluster.id} />
         ) : tab === 'usage' ? (
           <UsageTab key={cluster.id} cluster={cluster.id} />
+        ) : tab === 'certificates' ? (
+          <CertificatesTab key={cluster.id} cluster={cluster.id} />
         ) : (
           <OverviewTab key={cluster.id} cluster={cluster} />
         )}
