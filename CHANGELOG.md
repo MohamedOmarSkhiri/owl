@@ -4,6 +4,20 @@ All notable changes to Owl. The format follows [Keep a Changelog](https://keepac
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-11-12
+
+### Added
+
+- Certificate expiry. Every 10 minutes the agent checks the certificates that keep the cluster and its apps reachable, and raises `CertificateExpiring` 14 days before one runs out (critical at 3 days, and once expired):
+  - cert-manager Certificates, from their status. `CertificateNotReady` when cert-manager cannot issue or renew one for 10 minutes, with its reason.
+  - The HTTPS hosts of Ingresses and HTTPRoutes that cert-manager does not manage: the agent reads the certificate each host serves, as a browser would. A host the agent cannot reach is skipped, never reported, and a certificate that does not cover the host (a default one) is ignored.
+  - The API server's certificate and each node's kubelet certificate.
+  - The client certificate in the kubeconfig an agent signs in with, 30 days ahead (critical at 7): when it expires, Owl loses that cluster.
+  - Owl's own HTTPS certificate (the chart points the local agent at it when `tls.enabled`).
+
+  No Secret is read. Wildcard hosts are not checked: they have no single address to call. The agent logs what it watches after the first check.
+- Certificate, Ingress and HTTPRoute problems open the object's YAML.
+
 ## [0.12.0] - 2026-11-12
 
 ### Added

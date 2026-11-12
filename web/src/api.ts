@@ -23,7 +23,7 @@ export interface Cluster {
 export interface Problem {
   id: string
   cluster: string
-  source: 'pod' | 'event' | 'alertmanager' | 'node' | 'workload' | 'storage'
+  source: 'pod' | 'event' | 'alertmanager' | 'node' | 'workload' | 'storage' | 'certificate'
   severity: 'critical' | 'warning'
   namespace: string
   object: string
@@ -104,6 +104,9 @@ export const PROBLEM_KINDS: Record<string, ResourceKind> = {
   cronjob: k('batch', 'cronjobs', 'CronJob'),
   persistentvolumeclaim: k('', 'persistentvolumeclaims', 'PersistentVolumeClaim'),
   service: k('', 'services', 'Service'),
+  ingress: k('networking.k8s.io', 'ingresses', 'Ingress'),
+  httproute: k('gateway.networking.k8s.io', 'httproutes', 'HTTPRoute'),
+  certificate: k('cert-manager.io', 'certificates', 'Certificate'),
 }
 
 export const NAMESPACES: ResourceKind = {

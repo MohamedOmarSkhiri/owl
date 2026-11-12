@@ -37,7 +37,7 @@ import (
 
 type Problem struct {
 	Cluster   string    `json:"cluster"`
-	Source    string    `json:"source"`   // pod | event | node | workload | storage
+	Source    string    `json:"source"`   // pod | event | node | workload | storage | certificate
 	Severity  string    `json:"severity"` // critical | warning
 	Namespace string    `json:"namespace"`
 	Object    string    `json:"object"`
@@ -433,6 +433,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("dynamic client: %v", err)
 	}
+	// Certificates that expire: the apps', the cluster's and Owl's own (certs.go), every 10 min.
+	go newCertWatcher(client, dyn, cfg, nodeLister).run(ctx, tr)
+
 	// Reads cluster CPU and memory for each snapshot; the relay keeps them as history.
 	meter := &requestHandler{cs: client, dyn: dyn, pods: podLister, nodes: nodeLister}
 	sendSnapshot := func() {

@@ -10,6 +10,7 @@ Owl is a small, self-hosted dashboard for Kubernetes and K3s. Install it with He
 
 - **Overview**: CPU, memory, pods and open problems at a glance, with 60 days of history (1 h to 60 d charts, averages and peaks)
 - **Problems**: CrashLoopBackOff, ImagePullBackOff, OOMKilled, failed and long-pending pods, nodes not Ready or under pressure, stuck rollouts, workloads missing replicas, failed Jobs and CronJobs, volumes that cannot be provisioned, warning events
+- **Certificates**: warns before a certificate expires, 14 days ahead: your apps' HTTPS hosts (Ingress, HTTPRoute, cert-manager), the API server, kubelets, the kubeconfig Owl signs in with (30 days ahead) and Owl's own
 - **Crash recorder**: when a container crashes, its exit code and the last lines it printed, saved before Kubernetes throws them away
 - **Notifications**: Telegram, Slack, Discord or any webhook when a problem opens or a cluster goes down. Mute a problem, a reason or a namespace for an hour, a day, a week or until it resolves, or acknowledge it with a note
 - **Pods**: status, restarts (and when), age; open any pod for live logs, download them, or read its YAML
