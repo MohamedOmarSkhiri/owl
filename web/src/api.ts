@@ -22,7 +22,7 @@ export interface Cluster {
 export interface Problem {
   id: string
   cluster: string
-  source: 'pod' | 'event' | 'alertmanager'
+  source: 'pod' | 'event' | 'alertmanager' | 'node' | 'workload' | 'storage'
   severity: 'critical' | 'warning'
   namespace: string
   object: string
@@ -66,6 +66,22 @@ export interface ResourceItem {
 }
 
 export const PODS: ResourceKind = { group: '', version: 'v1', resource: 'pods', kind: 'Pod', namespaced: true }
+// Kinds a problem can name ("deployment/web"), to open the object from the Problems list.
+const k = (group: string, resource: string, kind: string, namespaced = true): ResourceKind => ({
+  group, version: 'v1', resource, kind, namespaced,
+})
+export const PROBLEM_KINDS: Record<string, ResourceKind> = {
+  node: k('', 'nodes', 'Node', false),
+  deployment: k('apps', 'deployments', 'Deployment'),
+  statefulset: k('apps', 'statefulsets', 'StatefulSet'),
+  daemonset: k('apps', 'daemonsets', 'DaemonSet'),
+  replicaset: k('apps', 'replicasets', 'ReplicaSet'),
+  job: k('batch', 'jobs', 'Job'),
+  cronjob: k('batch', 'cronjobs', 'CronJob'),
+  persistentvolumeclaim: k('', 'persistentvolumeclaims', 'PersistentVolumeClaim'),
+  service: k('', 'services', 'Service'),
+}
+
 export const NAMESPACES: ResourceKind = {
   group: '',
   version: 'v1',

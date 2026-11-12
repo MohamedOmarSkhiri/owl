@@ -37,7 +37,7 @@ import (
 
 type Problem struct {
 	Cluster   string    `json:"cluster"`
-	Source    string    `json:"source"`   // pod | event
+	Source    string    `json:"source"`   // pod | event | node | workload | storage
 	Severity  string    `json:"severity"` // critical | warning
 	Namespace string    `json:"namespace"`
 	Object    string    `json:"object"`
@@ -413,6 +413,7 @@ func main() {
 		UpdateFunc: func(_, o any) { onEvent(o) },
 	})
 	nodeInf.Informer() // register so the factory starts it
+	rules := newClusterRules(factory) // nodes, workloads, Jobs, volumes (cluster.go)
 
 	factory.Start(ctx.Done())
 	for typ, ok := range factory.WaitForCacheSync(ctx.Done()) {
@@ -421,6 +422,7 @@ func main() {
 		}
 	}
 	log.Print("caches synced, reporting")
+	rules.evaluate(tr, time.Now())
 
 	// Answer live requests from the app (resource browser, pod logs) via the relay.
 	go serveRequests(ctx, cfg, client, podInf.Lister(), nodeInf.Lister(), changes, relay, *clusterName)
@@ -461,6 +463,7 @@ func main() {
 			tr.resolveWhere(func(p Problem) bool {
 				return p.Source == "event" && time.Since(p.LastSeen) > eventTTL
 			})
+			rules.evaluate(tr, time.Now())
 			sendSnapshot()
 			if n%4 == 0 {
 				tr.resyncAll()
